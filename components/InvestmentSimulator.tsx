@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useFinancialData } from '../context/FinancialDataContext';
-import { formatCurrency, formatPercentage } from '../utils/formatters';
-import { TrendingUpIcon, ArrowUpIcon, ArrowDownIcon } from './icons';
+import { formatCurrency } from '../utils/formatters';
+import { TrendingUpIcon } from './icons';
 import { simulateInvestmentPurchase, getMarketData, MarketInfo } from '../services/marketDataService';
 import { useToast } from '../context/ToastContext';
 
 export const InvestmentSimulator: React.FC = () => {
-    const { investments, fixedIncomeInvestments, totalInvested, portfolioValue, marketData } = useFinancialData();
+    const { investments, totalInvested, portfolioValue, marketData } = useFinancialData();
     const { showToast } = useToast();
 
     const [ticker, setTicker] = useState('MXRF11');
@@ -52,7 +52,7 @@ export const InvestmentSimulator: React.FC = () => {
 
     const handleSimulate = async () => {
         if (!ticker.trim() || !amount || amount <= 0) {
-            showToast('Informe um ticker válido e o valor a aportar.', 'warning');
+            showToast('Informe um ativo válido e o valor a aportar.', 'warning');
             return;
         }
 
@@ -78,9 +78,9 @@ export const InvestmentSimulator: React.FC = () => {
             });
 
             setSimulationResult(res.text);
-            showToast('Análise de aporte gerada pelo Azure AI Foundry!', 'success');
+            showToast('Parecer estratégico gerado com sucesso!', 'success');
         } catch (e: any) {
-            showToast(e.message || 'Erro ao consultar o simulador de IA', 'error');
+            showToast(e.message || 'Erro ao processar a simulação', 'error');
         } finally {
             setLoading(false);
         }
@@ -97,54 +97,66 @@ export const InvestmentSimulator: React.FC = () => {
     const newWeight = newTotal > 0 ? (newAssetVal / newTotal) * 100 : 100;
 
     return (
-        <div className="space-y-8 animate-in fade-in duration-500">
-            {/* Header Card */}
-            <div className="bg-gradient-to-r from-teal-900 via-slate-900 to-slate-950 p-8 rounded-4xl border border-teal-500/20 text-white shadow-2xl relative overflow-hidden">
-                <div className="absolute right-0 top-0 w-96 h-96 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
-                <div className="relative z-10 max-w-3xl space-y-3">
-                    <div className="inline-flex items-center gap-2 px-3 py-1 bg-teal-500/20 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-widest border border-teal-500/30">
-                        <span>⚡ Inteligência Ativa Azure AI Foundry</span>
+        <div className="space-y-6 animate-in fade-in duration-500">
+            {/* Header Strip - Gestor Financeiro Standard */}
+            <div className="bg-white/40 dark:bg-slate-900/40 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 backdrop-blur-sm shadow-sm">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                        <div className="flex items-center gap-2 mb-1">
+                            <span className="w-2 h-2 rounded-full bg-teal-500" />
+                            <h2 className="text-label-caps !text-slate-400">Simulador de Aportes</h2>
+                        </div>
+                        <h3 className="text-xl font-bold text-gray-900 dark:text-white uppercase tracking-tight">
+                            Planejamento e Diagnóstico de Carteira
+                        </h3>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-2xl leading-relaxed">
+                            Simule o impacto de novos aportes antes de realizar a operação. O Gestor Financeiro avalia a margem de segurança fundamentalista (Preço Teto e Preço Justo) e monitora a exposição e risco de concentração da sua carteira.
+                        </p>
                     </div>
-                    <h2 className="text-2xl md:text-3xl font-black tracking-tight uppercase">Simulador de Aportes: "Devo Comprar?"</h2>
-                    <p className="text-xs md:text-sm text-slate-300 leading-relaxed">
-                        Avalie o impacto de um novo aporte antes de fechar a boleta. O Azure AI Foundry analisa o 
-                        <strong className="text-teal-300"> Preço Teto de Bazin (DY min 6%)</strong>, o <strong className="text-teal-300">Preço Justo de Graham</strong> e calcula o risco de concentração na sua carteira.
-                    </p>
+                    <div className="hidden lg:flex items-center gap-6 pr-2">
+                        <div className="text-right">
+                            <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Patrimônio Base</div>
+                            <div className="text-base font-black text-slate-900 dark:text-white tabular-nums">
+                                {formatCurrency(Number(totalInvested || portfolioValue || 0))}
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
             {/* Main Interactive Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                 {/* Form Controls (5 cols) */}
-                <div className="lg:col-span-5 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-6">
+                <div className="lg:col-span-5 bg-white/40 dark:bg-slate-900/40 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 backdrop-blur-sm shadow-sm space-y-5">
                     <div>
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Ativo Pretendido (Ticker)</label>
+                        <h4 className="text-label-caps !text-slate-400 mb-3">Configuração do Aporte</h4>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Ativo Pretendido (Ticker)</label>
                         <div className="relative">
                             <input 
                                 type="text"
                                 value={ticker}
                                 onChange={e => setTicker(e.target.value.toUpperCase())}
                                 placeholder="Ex: MXRF11, PETR4, VALE3..."
-                                className="w-full h-12 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 text-base font-black text-slate-900 dark:text-white uppercase focus:ring-2 focus:ring-teal-500/20 outline-none"
+                                className="w-full h-11 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 text-sm font-bold text-slate-900 dark:text-white uppercase focus:ring-2 focus:ring-teal-500/20 outline-none"
                             />
                             {fetchingQuote && (
-                                <div className="absolute right-4 top-3 text-[10px] font-bold text-teal-500 animate-pulse">
-                                    Buscando cotação...
+                                <div className="absolute right-3 top-3 text-[10px] font-bold text-teal-600 dark:text-teal-400 animate-pulse">
+                                    Atualizando...
                                 </div>
                             )}
                         </div>
 
                         {/* Quick Suggestions */}
-                        <div className="flex flex-wrap gap-1.5 mt-3">
+                        <div className="flex flex-wrap gap-1 mt-2.5">
                             {suggestions.map(s => (
                                 <button
                                     key={s}
                                     type="button"
                                     onClick={() => setTicker(s)}
-                                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition-all ${
-                                        ticker === s 
-                                            ? 'bg-teal-600 text-white shadow-sm' 
-                                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+                                    className={`px-2.5 py-1 text-[9px] font-bold uppercase rounded-lg border transition-all ${
+                                        ticker === s
+                                            ? 'bg-teal-600 text-white border-teal-600 shadow-sm'
+                                            : 'bg-white dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-teal-500'
                                     }`}
                                 >
                                     {s}
@@ -153,67 +165,71 @@ export const InvestmentSimulator: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Value & Price Inputs */}
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Valor do Aporte (R$)</label>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Valor do Aporte (R$)</label>
                             <input 
                                 type="number"
-                                value={amount}
-                                onChange={e => setAmount(Number(e.target.value))}
-                                min="10"
-                                step="50"
-                                className="w-full h-12 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 text-base font-black text-emerald-600 dark:text-emerald-400 focus:ring-2 focus:ring-teal-500/20 outline-none"
+                                value={amount || ''}
+                                onChange={e => setAmount(Math.max(0, Number(e.target.value)))}
+                                placeholder="1000"
+                                className="w-full h-11 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 text-sm font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-teal-500/20 outline-none"
                             />
                         </div>
 
                         <div>
-                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Cotação Atual (R$)</label>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Cotação Atual (R$)</label>
                             <input 
                                 type="number"
-                                value={customPrice}
-                                onChange={e => setCustomPrice(e.target.value ? Number(e.target.value) : '')}
                                 step="0.01"
-                                className="w-full h-12 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 text-base font-black text-slate-900 dark:text-white focus:ring-2 focus:ring-teal-500/20 outline-none"
+                                value={customPrice}
+                                onChange={e => setCustomPrice(e.target.value === '' ? '' : Number(e.target.value))}
+                                placeholder={activeQuote?.price ? String(activeQuote.price) : '0.00'}
+                                className="w-full h-11 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 text-sm font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-teal-500/20 outline-none"
                             />
                         </div>
                     </div>
 
-                    {/* Instant Metrics Card */}
+                    {/* Active Market Data Snapshot */}
                     {activeQuote && (
-                        <div className="p-5 bg-slate-50 dark:bg-slate-950/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
+                        <div className="p-4 bg-slate-50/60 dark:bg-slate-800/40 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-3">
                             <div className="flex items-center justify-between">
-                                <span className="text-xs font-bold text-slate-600 dark:text-slate-400">Termômetro Fundamentalista</span>
-                                <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${
-                                    activeQuote.decision === 'COMPRA_FORTE' ? 'bg-emerald-500 text-white' :
-                                    activeQuote.decision === 'COMPRA' ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30' :
-                                    activeQuote.decision === 'AGUARDAR' ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30' :
-                                    'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                                <div className="flex items-center gap-2">
+                                    <span className="font-bold text-xs text-slate-900 dark:text-white uppercase">{ticker}</span>
+                                    <span className={`text-[10px] font-mono font-bold ${activeQuote.changePercent && activeQuote.changePercent >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                        {activeQuote.changePercent && activeQuote.changePercent >= 0 ? '+' : ''}{activeQuote.changePercent?.toFixed(2)}%
+                                    </span>
+                                </div>
+                                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${
+                                    activeQuote.decision === 'COMPRA_FORTE' ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20' :
+                                    activeQuote.decision === 'COMPRA' ? 'bg-teal-500/15 text-teal-700 dark:text-teal-400 border border-teal-500/20' :
+                                    activeQuote.decision === 'AGUARDAR' ? 'bg-rose-500/15 text-rose-700 dark:text-rose-400 border border-rose-500/20' :
+                                    'bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/20'
                                 }`}>
                                     {activeQuote.decisionLabel || 'Neutro'}
                                 </span>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-200 dark:border-slate-800/60 text-xs">
+                            <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-200 dark:border-slate-700/60 text-xs">
                                 <div>
-                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Teto Bazin (DY 6%)</span>
+                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Teto Bazin (DY 6%)</span>
                                     <span className="font-bold text-slate-900 dark:text-white">
                                         {activeQuote.bazinPrice ? formatCurrency(activeQuote.bazinPrice) : 'n/d'}
                                     </span>
                                     {activeQuote.bazinMargin !== undefined && (
-                                        <span className={`text-[10px] ml-1.5 font-black ${activeQuote.bazinMargin >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                                        <span className={`text-[9px] ml-1 font-bold ${activeQuote.bazinMargin >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
                                             ({activeQuote.bazinMargin >= 0 ? `+${activeQuote.bazinMargin}%` : `${activeQuote.bazinMargin}%`})
                                         </span>
                                     )}
                                 </div>
 
                                 <div>
-                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Graham Justo</span>
+                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Graham Justo</span>
                                     <span className="font-bold text-slate-900 dark:text-white">
                                         {activeQuote.grahamPrice ? formatCurrency(activeQuote.grahamPrice) : 'n/d'}
                                     </span>
                                     {activeQuote.grahamMargin !== undefined && (
-                                        <span className={`text-[10px] ml-1.5 font-black ${activeQuote.grahamMargin >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                                        <span className={`text-[9px] ml-1 font-bold ${activeQuote.grahamMargin >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
                                             ({activeQuote.grahamMargin >= 0 ? `+${activeQuote.grahamMargin}%` : `${activeQuote.grahamMargin}%`})
                                         </span>
                                     )}
@@ -223,7 +239,7 @@ export const InvestmentSimulator: React.FC = () => {
                     )}
 
                     {/* Pre-computation of allocation */}
-                    <div className="p-4 bg-teal-50/50 dark:bg-teal-950/20 rounded-2xl border border-teal-200 dark:border-teal-900/40 text-xs space-y-2">
+                    <div className="p-4 bg-teal-50/40 dark:bg-teal-950/20 rounded-2xl border border-teal-200/70 dark:border-teal-900/40 text-xs space-y-2">
                         <div className="flex justify-between">
                             <span className="text-slate-600 dark:text-slate-400 font-medium">Quantidade estimada:</span>
                             <span className="font-bold text-slate-900 dark:text-white">~{estQuantity} cotas/ações</span>
@@ -239,38 +255,38 @@ export const InvestmentSimulator: React.FC = () => {
                     <button
                         onClick={handleSimulate}
                         disabled={loading}
-                        className="w-full py-4 bg-teal-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-teal-700 active:scale-95 shadow-lg shadow-teal-600/30 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                        className="w-full py-3.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold uppercase tracking-widest text-[10px] active:scale-95 shadow-md shadow-teal-600/20 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                     >
                         {loading ? (
                             <>
-                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                <span>Consultando Azure AI Foundry...</span>
+                                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                <span>Processando Análise...</span>
                             </>
                         ) : (
                             <>
-                                <span>Analisar Aporte com IA</span>
-                                <TrendingUpIcon className="w-4 h-4" />
+                                <span>Simular Aporte</span>
+                                <TrendingUpIcon className="w-3.5 h-3.5" />
                             </>
                         )}
                     </button>
                 </div>
 
-                {/* AI Executive Report (7 cols) */}
-                <div className="lg:col-span-7 bg-white dark:bg-slate-900 p-8 rounded-4xl border border-slate-200 dark:border-slate-800 shadow-sm min-h-[460px] flex flex-col justify-between">
+                {/* Report Panel (7 cols) */}
+                <div className="lg:col-span-7 bg-white/40 dark:bg-slate-900/40 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 backdrop-blur-sm shadow-sm min-h-[460px] flex flex-col justify-between">
                     <div>
-                        <div className="flex items-center justify-between pb-6 mb-6 border-b border-slate-100 dark:border-slate-800">
+                        <div className="flex items-center justify-between pb-4 mb-5 border-b border-slate-200/60 dark:border-slate-800">
                             <div>
-                                <h3 className="text-xs font-black uppercase tracking-widest text-slate-400">Parecer da Inteligência Artificial</h3>
-                                <h4 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">Avaliação de Aporte - {ticker}</h4>
+                                <h3 className="text-label-caps !text-slate-400">Diagnóstico Estratégico</h3>
+                                <h4 className="text-base font-bold text-gray-900 dark:text-white uppercase tracking-tight">Avaliação de Aporte — {ticker}</h4>
                             </div>
-                            <span className="px-3 py-1 bg-teal-50 dark:bg-teal-950/40 text-teal-600 dark:text-teal-400 text-[10px] font-black uppercase tracking-widest rounded-lg border border-teal-200 dark:border-teal-800">
-                                gpt-4.1
+                            <span className="px-3 py-1 bg-teal-500/10 text-teal-600 dark:text-teal-400 text-[9px] font-black uppercase tracking-widest rounded-lg border border-teal-500/20">
+                                Gestor Financeiro
                             </span>
                         </div>
 
                         {loading ? (
                             <div className="py-20 flex flex-col items-center justify-center text-center space-y-4">
-                                <div className="w-12 h-12 border-4 border-teal-500/20 border-t-teal-600 rounded-full animate-spin" />
+                                <div className="w-10 h-10 border-3 border-teal-500/20 border-t-teal-600 rounded-full animate-spin" />
                                 <div className="space-y-1">
                                     <p className="text-sm font-bold text-slate-900 dark:text-white">Analisando múltiplos fundamentalistas e carteira...</p>
                                     <p className="text-xs text-slate-400">Calculando preço justo, teto de dividendos e sensibilidade de risco.</p>
@@ -282,20 +298,20 @@ export const InvestmentSimulator: React.FC = () => {
                             </div>
                         ) : (
                             <div className="py-20 flex flex-col items-center justify-center text-center space-y-3 text-slate-400">
-                                <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800/50 rounded-3xl flex items-center justify-center text-2xl">
-                                    💡
+                                <div className="w-14 h-14 bg-slate-100 dark:bg-slate-800/50 rounded-2xl flex items-center justify-center text-xl">
+                                    📊
                                 </div>
                                 <p className="text-sm font-bold text-slate-700 dark:text-slate-300">Nenhuma simulação ativa no momento.</p>
                                 <p className="text-xs max-w-sm text-slate-400">
-                                    Selecione o ativo pretendido e o valor do aporte ao lado para receber um parecer executivo gerado pelo Azure AI Foundry.
+                                    Selecione o ativo pretendido e o valor do aporte ao lado para gerar o parecer executivo do Gestor Financeiro.
                                 </p>
                             </div>
                         )}
                     </div>
 
-                    <div className="pt-6 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-400 flex items-center justify-between">
-                        <span>Gestor Financeiro AI Advisor • Model gpt-4.1</span>
-                        <span>* Análise probabilística e fundamentalista orientada a dados.</span>
+                    <div className="pt-4 mt-6 border-t border-slate-200/60 dark:border-slate-800 text-[10px] text-slate-400 flex flex-col sm:flex-row items-center justify-between gap-2">
+                        <span>Gestor Financeiro · Análise Fundamentalista & Alocação Estratégica</span>
+                        <span>* Métricas orientadas a dados e gestão de risco.</span>
                     </div>
                 </div>
             </div>

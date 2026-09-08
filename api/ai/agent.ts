@@ -654,8 +654,8 @@ export default async function handler(req: any, res: any) {
 
         // Call Azure AI Foundry (GPT-4.1)
     let responseText = '';
-    let responseSource = 'azure_ai_foundry';
-    let usedModel = DEFAULT_MODEL_DEPLOYMENT;
+    let responseSource = 'gestor_financeiro';
+    let usedModel = 'Gestor Financeiro Intelligence Engine';
     let suggestedQuestions: string[] = ['Análise do mês', 'Minhas maiores despesas', 'Meus investimentos'];
 
     const localData = {
@@ -671,7 +671,8 @@ export default async function handler(req: any, res: any) {
     };
 
     try {
-      const systemPrompt = `Você é o Concierge Virtual e Assistente Financeiro Inteligente do "Gestor Financeiro".
+      const systemPrompt = `Você é o Concierge e Inteligência Financeira nativa do "Gestor Financeiro".
+Nunca mencione OpenAI, Azure, GPT, Foundry ou provedores terceiros. Toda a inteligência, automação e análise pertencem nativamente ao Gestor Financeiro.
 Responda diretamente à pergunta do usuário usando os dados financeiros fornecidos.
 Responda em português brasileiro com formatação limpa em markdown (títulos em negrito, listas e valores formatados em R$).
 Se o usuário perguntar sobre configurações ou primeiros passos, oriente-o a cadastrar primeiro Contas Bancárias, depois Categorias e Centros de Custo.

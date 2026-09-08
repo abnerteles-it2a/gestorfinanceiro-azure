@@ -67,8 +67,8 @@ export default async function handler(req: any, res: any) {
 
     let text = '';
     let transaction: any = null;
-    let provider = 'azure_ai_foundry';
-    let usedModel = DEFAULT_MODEL_DEPLOYMENT;
+    let provider = 'gestor_financeiro';
+    let usedModel = 'Gestor Financeiro Intelligence Engine';
 
     try {
       if (kind === 'transaction') {
@@ -127,8 +127,9 @@ Texto do Usuário: "${txCtxObj.text}"`;
         const currentPercent = totalInvested > 0 ? ((currentAssetTotal / totalInvested) * 100).toFixed(1) : '0.0';
         const newPercent = newTotal > 0 ? ((newAssetTotal / newTotal) * 100).toFixed(1) : '100.0';
 
-        const prompt = `Você é o Agente Sênior de Decisão de Investimentos do Gestor Financeiro.
-O usuário está avaliando realizar um novo aporte e quer saber: "Devo Comprar?".
+        const prompt = `Você é a inteligência de alocação de investimentos do Gestor Financeiro.
+Nunca mencione OpenAI, Azure, GPT, Foundry ou provedores externos. Todas as análises são desenvolvidas pelo Gestor Financeiro.
+O usuário está avaliando realizar um novo aporte e solicita um diagnóstico estratégico de alocação: "Devo Comprar?".
 
 Dados do Aporte Pretendido:
 - Ativo: ${targetTicker}
@@ -151,13 +152,13 @@ Gere uma análise institucional e rigorosa contendo:
 
         text = await askAzureOpenAI({
           messages: [
-            { role: 'system', content: 'Você é um estrategista de alocação de carteiras (CFA). Seja técnico, objetivo, encorajador e direto ao ponto com formatação limpa em markdown.' },
+            { role: 'system', content: 'Você é o Gestor Financeiro, inteligência proprietária da plataforma. Seja técnico, objetivo e direto ao ponto com formatação elegante em markdown. Nunca mencione terceiros, OpenAI, Azure, GPT ou provedores externos.' },
             { role: 'user', content: prompt }
           ],
           temperature: 0.3,
         });
       } else if (kind === 'investment') {
-        const prompt = `Você é o Consultor de Investimentos do Gestor Financeiro. Analise a carteira do usuário e gere recomendações claras e prescritivas:
+        const prompt = `Você é a inteligência de investimentos do Gestor Financeiro. Analise a carteira do usuário e gere recomendações claras e prescritivas:
 - Diagnóstico da carteira e alocação atual vs perfil informado.
 - Sugestões práticas de rebalanceamento (Renda Fixa, FIIs, Ações, Ativos Internacionais).
 - Pontos de atenção sobre diversificação e risco.
@@ -167,48 +168,44 @@ ${investCtx}`;
 
         text = await askAzureOpenAI({
           messages: [
-            { role: 'system', content: 'Você é um especialista sênior em investimentos (CFA/CEA). Fale em português de forma clara, direta e motivadora.' },
+            { role: 'system', content: 'Você é o Gestor Financeiro, especialista em alocação patrimonial. Fale em português de forma clara, direta e orientada a dados. Nunca mencione provedores externos.' },
             { role: 'user', content: prompt }
           ],
           temperature: 0.4,
         });
       } else {
-        // kind === 'finance'
-        const prompt = `Você é o CFO Virtual / Advisor Financeiro do Gestor Financeiro.
+        const prompt = `Você é o advisor financeiro do Gestor Financeiro.
 Analise a saúde financeira do usuário no mês atual e forneça:
 1. **Diagnóstico do Mês:** Avaliação do saldo, receitas, despesas e taxa de poupança.
 2. **Alertas & Atenção:** Destaque se alguma categoria ou centro de custo está consumindo mais de 25% da receita.
-3. **Plano de Ação Acionável:** 2 a 3 conselhos diretos e práticos para maximizar a economia ou investir com sabedoria.
+3. **Ações Práticas Recomendadas:** 3 passos objetivos para maximizar sobras e liquidez.
 
 Contexto Financeiro:
 ${financeCtx}`;
 
         text = await askAzureOpenAI({
           messages: [
-            { role: 'system', content: 'Você é o CFO do usuário. Responda em português com formatação limpa em markdown, direto ao ponto.' },
+            { role: 'system', content: 'Você é o Gestor Financeiro. Nunca mencione provedores externos, OpenAI ou Azure. Fale em português de forma clara e profissional.' },
             { role: 'user', content: prompt }
           ],
-          temperature: 0.3,
+          temperature: 0.4,
         });
       }
     } catch (aiErr: any) {
-      console.warn('[Azure AI] Falha ao consultar Azure OpenAI. Ativando fallback local:', aiErr?.message);
-      provider = 'local_fallback';
-      usedModel = 'Local Rules Engine';
-
+      console.warn('[Azure AI] Fallback triggered:', aiErr?.message);
       if (kind === 'transaction') {
         const categories = Array.isArray(ctx.categories) ? ctx.categories.map((c: any) => c.name || c) : [];
         const accounts = Array.isArray(ctx.accounts) ? ctx.accounts : [];
         transaction = await parseTransactionFromText(questionRaw, categories, accounts);
         text = JSON.stringify(transaction || {});
       } else {
-        text = `**Diagnóstico Financeiro (Offline)**\n\n- Saldo Atual: ${formatCurrency(Number(ctx.totalBalance || 0))}\n- Receitas: ${formatCurrency(Number(ctx.monthIncome || 0))}\n- Despesas: ${formatCurrency(Number(ctx.monthExpense || 0))}\n\n*Conexão com Azure AI Foundry em configuração.*`;
+        text = `**Diagnóstico Financeiro**\n\n- Saldo Atual: ${formatCurrency(Number(ctx.totalBalance || 0))}\n- Receitas: ${formatCurrency(Number(ctx.monthIncome || 0))}\n- Despesas: ${formatCurrency(Number(ctx.monthExpense || 0))}\n\n*Inteligência do Gestor Financeiro temporariamente indisponível.*`;
       }
     }
 
     res.statusCode = 200;
     res.setHeader('content-type', 'application/json');
-    res.end(JSON.stringify(transaction ? { text, transaction, provider, model: usedModel } : { text, provider, model: usedModel }));
+    res.end(JSON.stringify(transaction ? { text, transaction } : { text }));
   } catch (e: any) {
     console.error('Advice Error:', e);
     res.statusCode = 500;
