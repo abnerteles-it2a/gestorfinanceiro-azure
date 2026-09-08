@@ -364,36 +364,61 @@ export default async function handler(req: any, res: any) {
     }
   }
 
-  // Handle crypto or currencies via AwesomeAPI
+// Fetch crypto quote via Binance or AwesomeAPI with high reliability
+async function fetchCryptoQuote(ticker: string): Promise<{ price: number; change: number; changePercent: number; high52w?: number } | null> {
+  const norm = ticker.toUpperCase().replace(/BRL$/, '');
+  // 1. Try Binance
+  try {
+    const raw = await httpGet(`https://api.binance.com/api/v3/ticker/24hr?symbol=${encodeURIComponent(norm)}BRL`, {}, 4000);
+    const json = JSON.parse(raw);
+    if (json && Number(json.lastPrice) > 0) {
+      return {
+        price: Number(json.lastPrice),
+        change: Number(json.priceChange || 0),
+        changePercent: Number(json.priceChangePercent || 0),
+        high52w: Number(json.highPrice || json.lastPrice)
+      };
+    }
+  } catch {}
+
+  // 2. Try AwesomeAPI fallback
+  try {
+    const pair = `${norm}-BRL`;
+    const raw = await httpGet(`https://economia.awesomeapi.com.br/last/${encodeURIComponent(pair)}`, {}, 4000);
+    const json = JSON.parse(raw);
+    const key = `${norm}BRL`;
+    const d = json[key];
+    if (d && Number(d.bid || d.ask) > 0) {
+      const price = Number(d.bid || d.ask);
+      return {
+        price,
+        change: Number(d.varBid || 0),
+        changePercent: Number(d.pctChange || 0),
+        high52w: Number(d.high || price)
+      };
+    }
+  } catch {}
+
+  return null;
+}
+
+  // Handle crypto or currencies
   const cryptoTickers = tickersToFetch.filter(t => detectAssetClass(t) === 'CRYPTO' || detectAssetClass(t) === 'CURRENCY');
   const b3Tickers = tickersToFetch.filter(t => !cryptoTickers.includes(t));
 
   if (cryptoTickers.length > 0) {
-    try {
-      const cryptoMap: Record<string, string> = {
-        BTC: 'BTC-BRL', ETH: 'ETH-BRL', SOL: 'SOL-BRL', USD: 'USD-BRL', EUR: 'EUR-BRL',
-        BTCBRL: 'BTC-BRL', ETHBRL: 'ETH-BRL', USDBRL: 'USD-BRL', EURBRL: 'EUR-BRL'
-      };
-      const pairs = [...new Set(cryptoTickers.map(c => cryptoMap[c] || `${c}-BRL`))].join(',');
-      const rawAwesome = await httpGet(`https://economia.awesomeapi.com.br/last/${pairs}`, {}, 5000);
-      const dataAwesome = JSON.parse(rawAwesome);
-
-      for (const c of cryptoTickers) {
-        const pairKey = (cryptoMap[c] || `${c}-BRL`).replace('-', '');
-        const d = dataAwesome[pairKey];
-        if (d) {
-          const price = Number(d.bid || d.ask || 0);
-          const changePercent = Number(d.pctChange || 0);
-          const change = Number(d.varBid || 0);
-          const high = Number(d.high || price);
+    await Promise.all(cryptoTickers.map(async (c) => {
+      try {
+        const q = await fetchCryptoQuote(c);
+        if (q && q.price > 0) {
           const aClass = detectAssetClass(c);
-          const val = calculateSpecializedValuation(c, price, aClass, { changePercent }, high);
+          const val = calculateSpecializedValuation(c, q.price, aClass, { changePercent: q.changePercent }, q.high52w);
 
           const item: MarketItem = {
             ticker: c,
-            price,
-            change,
-            changePercent,
+            price: q.price,
+            change: q.change,
+            changePercent: q.changePercent,
             assetClass: aClass,
             signal: val.signal || 'Manter',
             decision: val.decision || 'MANTER',
@@ -419,10 +444,10 @@ export default async function handler(req: any, res: any) {
           quotesCache.set(c, { item, ts: now });
           results[c] = item;
         }
+      } catch (e: any) {
+        console.warn(`[MarketData] Crypto fetch error for ${c}:`, e.message);
       }
-    } catch (e: any) {
-      console.warn('[MarketData] AwesomeAPI fetch error:', e.message);
-    }
+    }));
   }
 
   // Handle B3 Tickers
