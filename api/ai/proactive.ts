@@ -6,6 +6,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { formatCurrency } from '../../utils/formatters';
 import { verifySession } from '../_auth_shared';
+import { askAzureOpenAI } from './_azure_openai';
 
 // DB Pool (Shared logic from agent.ts)
 let pool: Pool | null = null;
@@ -372,65 +373,17 @@ export default async function handler(req: any, res: any) {
 
 Responda APENAS com o texto do conselho, sem JSON, sem formatação, sem aspas. Exemplo: "Reduza gastos com alimentação para manter saldo positivo até dia 30."`;
 
-          if (provider === 'aws') {
-              const { BedrockRuntimeClient, InvokeModelCommand } = await import('@aws-sdk/client-bedrock-runtime');
-              const client = new BedrockRuntimeClient({ region: 'us-west-2' });
-              const awsBody = JSON.stringify({
-                  anthropic_version: "bedrock-2023-05-31",
-                  max_tokens: 200,
-                  messages: [{ role: "user", content: aiPrompt }]
-              });
-              const command = new InvokeModelCommand({
-                  modelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
-                  contentType: "application/json",
-                  accept: "application/json",
-                  body: awsBody
-              });
-              const response = await client.send(command).catch(() => null);
-              if (response) {
-                  const resBody = JSON.parse(new TextDecoder().decode(response.body));
-                  const aiText = resBody.content?.[0]?.text?.trim();
-                  if (aiText && aiText.length > 10 && aiText.length < 200) {
-                      finalInsights.push({ type: 'neutral', message: `✨ ${aiText}`, icon: 'target' });
-                  }
-              }
-          } else if (provider === 'vertex') {
-              const { VertexAI } = await import('@google-cloud/vertexai');
-              const credsRaw = process.env.GOOGLE_CREDENTIALS_JSON || '{}';
-              let creds: any = {};
-              try { creds = JSON.parse(credsRaw); } catch { try { creds = JSON.parse(Buffer.from(credsRaw, 'base64').toString('utf-8')); } catch {} }
-              
-              const vertexOptions: any = {
-                  project: process.env.GOOGLE_CLOUD_PROJECT || creds.project_id,
-                  location: process.env.GOOGLE_VERTEX_LOCATION || 'us-central1'
-              };
-              
-              // Fix: Pass explicit credentials (required for Amplify/non-ADC environments)
-              if (creds.client_email && creds.private_key) {
-                  const pk = String(creds.private_key).replace(/\\n/g, '\n');
-                  vertexOptions.googleAuthOptions = {
-                      credentials: { client_email: creds.client_email, private_key: pk },
-                      scopes: ['https://www.googleapis.com/auth/cloud-platform']
-                  };
-              }
-              
-              const vertexAI = new VertexAI(vertexOptions);
-              const modelName = process.env.GOOGLE_VERTEX_MODEL || 'gemini-2.5-flash';
-              const model = vertexAI.getGenerativeModel({ 
-                  model: modelName,
-                  generationConfig: { maxOutputTokens: 200, temperature: 0.3 }
-              });
-              const result = await model.generateContent(aiPrompt).catch((err) => {
-                  console.error('[Advisor] Vertex AI failed:', err.message);
-                  return null;
-              });
-              if (result) {
-                  let aiText = result.response.candidates?.[0]?.content?.parts?.[0]?.text || '';
-                  aiText = aiText.replace(/```/g, '').replace(/"/g, '').trim();
-                  if (aiText && aiText.length > 10 && aiText.length < 200) {
-                      finalInsights.push({ type: 'neutral', message: `✨ ${aiText}`, icon: 'target' });
-                  }
-              }
+          const aiResponse = await askAzureOpenAI({
+              messages: [
+                  { role: 'system', content: 'Você é o AI Advisor de finanças. Dê conselhos preditivos curtos, precisos e motivadores.' },
+                  { role: 'user', content: aiPrompt }
+              ],
+              maxTokens: 100,
+              temperature: 0.3,
+          });
+          const aiText = aiResponse?.trim().replace(/["`]/g, '');
+          if (aiText && aiText.length > 5 && aiText.length < 200) {
+              finalInsights.push({ type: 'neutral', message: `✨ ${aiText}`, icon: 'target' });
           }
       } catch (aiErr) {
           console.warn('[Advisor] AI enhancement skipped:', (aiErr as any)?.message);

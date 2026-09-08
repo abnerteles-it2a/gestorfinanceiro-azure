@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { jwtVerify } from 'jose';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID as uuidv4 } from 'crypto';
 import { verifySession } from '../_auth_shared';
 
 

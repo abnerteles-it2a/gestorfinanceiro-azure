@@ -1,8 +1,6 @@
 import { Pool } from 'pg';
 import { jwtVerify } from 'jose';
-import { PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { getS3Client, getBucketName } from '../s3-client';
+import { getUploadUrl, getReadUrl, deleteBlob, getContainerName } from '../s3-client';
 import { verifySession } from '../_auth_shared';
 
 let poolInstance: Pool | null = null;
@@ -26,8 +24,7 @@ const getPool = () => {
 
 export default async function handler(req: any, res: any) {
   const pool = getPool();
-  const s3Client = getS3Client();
-  const bucketName = getBucketName();
+  const bucketName = getContainerName();
 
   try {
     // 2. Auth Check (Enforcing Single-Session Compliance)
@@ -44,10 +41,8 @@ export default async function handler(req: any, res: any) {
         userId = result.userId;
     }
 
-    if (!s3Client || !bucketName) {
-       console.error('S3_CLIENT_MISSING', { hasClient: !!s3Client, hasBucket: !!bucketName });
-       // Fallback or error if S3 is not configured
-       // If GET request and just listing from DB, it might fail on signing URLs if client is missing
+    if (!bucketName) {
+       console.warn('[Storage] Container de documentos não configurado');
     }
 
     if (req.method === 'GET') {
@@ -177,12 +172,8 @@ export default async function handler(req: any, res: any) {
       
       const withSigned = await Promise.all(rows.map(async (d: any) => {
         try { 
-          if (s3Client && bucketName) {
-            const command = new GetObjectCommand({ Bucket: bucketName, Key: d.pathname });
-            const signed = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-            return { ...d, url: signed }; 
-          }
-          return d;
+          const signed = await getReadUrl(d.pathname);
+          return { ...d, url: signed }; 
         } catch { return d; }
       }));
       
@@ -198,14 +189,9 @@ export default async function handler(req: any, res: any) {
       if (!pathname) { res.statusCode = 400; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ error: 'missing_pathname' })); return; }
       
       try {
-        if (s3Client && bucketName) {
-          await s3Client.send(new DeleteObjectCommand({ Bucket: bucketName, Key: pathname }));
-          // Also try to delete .meta.json if it exists (legacy support)
-          try { await s3Client.send(new DeleteObjectCommand({ Bucket: bucketName, Key: pathname + '.meta.json' })); } catch {}
-        }
+        await deleteBlob(pathname);
       } catch (e: any) {
-        console.error('s3_delete_failed', e);
-        // Continue to delete from DB even if S3 fails (orphan record)
+        console.error('storage_delete_failed', e);
       }
 
       try {
@@ -247,19 +233,9 @@ export default async function handler(req: any, res: any) {
             console.error('upload_error_missing_filename', input);
             res.statusCode = 400; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ error: 'missing_filename', received: input })); return; 
         }
-        if (!s3Client || !bucketName) { 
-            const missing = [];
-            if (!s3Client) missing.push('S3_CLIENT (AccessKey/Secret)');
-            if (!bucketName) missing.push('BUCKET_NAME');
-            console.error('upload_error_s3_not_configured', missing);
-            res.statusCode = 500; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ error: 's3_not_configured', missing })); return; 
-        }
-
         const pathnameBase = filename.replace(/[^a-zA-Z0-9_\-.]/g, '_');
         const key = (orgId ? `org_${orgId}/` : '') + `user_${userId}/` + `${Date.now()}_${pathnameBase}`;
-        
-        const command = new PutObjectCommand({ Bucket: bucketName, Key: key, ContentType: contentType });
-        const url = await getSignedUrl(s3Client, command, { expiresIn: 600 }); // 10 minutes to upload
+        const url = await getUploadUrl(key, contentType);
 
         res.statusCode = 200; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ url, key }));
         return;
@@ -407,16 +383,6 @@ export default async function handler(req: any, res: any) {
          const pathnameBase = filename.replace(/[^a-zA-Z0-9_\-.]/g, '_');
          const key = (String(input.orgId || '') ? `org_${input.orgId}/` : '') + `user_${userId}/` + `${Date.now()}_${pathnameBase}`;
          
-         if (s3Client && bucketName) {
-            await s3Client.send(new PutObjectCommand({
-                Bucket: bucketName,
-                Key: key,
-                Body: buf,
-                ContentType: input.contentType || 'application/octet-stream'
-            }));
-            // Insert DB ...
-            // Re-using logic would be better.
-         }
       }
       
       console.error('upload_error_invalid_action', { action, inputKeys: Object.keys(input) });

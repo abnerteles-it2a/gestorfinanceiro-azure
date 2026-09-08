@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "gestor-financeiro-azure",
   "private": true,
   "version": "1.0.0",
@@ -15,6 +15,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@azure/communication-email": "^1.0.0",
     "@azure/openai": "^1.0.0-beta.12",
     "openai": "^4.86.1",
     "@azure/identity": "^4.4.1",
@@ -30,9 +31,11 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
+    "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^22.19.3",
+    "@types/pg": "^8.11.11",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.0.0",

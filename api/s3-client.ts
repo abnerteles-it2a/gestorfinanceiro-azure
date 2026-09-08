@@ -1,36 +1,56 @@
-import { S3Client } from '@aws-sdk/client-s3';
+import { BlobServiceClient } from '@azure/storage-blob';
 
-let s3Client: S3Client | null = null;
+const CONNECTION_STRING = process.env.AZURE_STORAGE_CONNECTION_STRING || '';
+const CONTAINER_NAME = process.env.AZURE_STORAGE_CONTAINER || 'docs-vault';
 
-export const getS3Client = () => {
-  if (s3Client) return s3Client;
+let blobServiceClientInstance: BlobServiceClient | null = null;
 
-  const region = process.env.AWS_REGION || process.env.REGION || 'us-east-1';
-  const accessKeyId = process.env.AWS_ACCESS_KEY_ID || process.env.ACCESS_KEY_ID;
-  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY || process.env.SECRET_ACCESS_KEY;
-
-  if (accessKeyId && secretAccessKey) {
-    s3Client = new S3Client({
-      region,
-      credentials: {
-        accessKeyId,
-        secretAccessKey,
-      },
-    });
-  } else {
-    console.error('S3_CLIENT_INIT_FAILED', {
-      hasRegion: !!region,
-      hasAccessKey: !!accessKeyId,
-      hasSecret: !!secretAccessKey
-    });
+export const getBlobServiceClient = (): BlobServiceClient | null => {
+  if (blobServiceClientInstance) return blobServiceClientInstance;
+  if (CONNECTION_STRING) {
+    try {
+      blobServiceClientInstance = BlobServiceClient.fromConnectionString(CONNECTION_STRING);
+    } catch (e) {
+      console.warn('[Azure Storage] Falha ao inicializar BlobServiceClient:', e);
+    }
   }
-  return s3Client;
+  return blobServiceClientInstance;
 };
 
-export const getBucketName = () => {
-  return process.env.AWS_S3_BUCKET_NAME || process.env.S3_BUCKET_NAME || '';
-};
+export const getContainerName = (): string => CONTAINER_NAME;
+export const getBucketName = (): string => CONTAINER_NAME;
 
-// Legacy exports for compatibility during refactor (though we will update consumer)
-export { s3Client }; 
-export const BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME || process.env.S3_BUCKET_NAME || '';
+// Azure Storage Helper for Uploads and Reads
+export async function getUploadUrl(pathname: string, contentType: string): Promise<string> {
+  const client = getBlobServiceClient();
+  if (!client) {
+    // Return mock upload endpoint for local / staging without credentials
+    return `/api/fiscal-docs/upload?mock=1&pathname=${encodeURIComponent(pathname)}`;
+  }
+  const containerClient = client.getContainerClient(CONTAINER_NAME);
+  const blockBlobClient = containerClient.getBlockBlobClient(pathname);
+  return blockBlobClient.url;
+}
+
+export async function getReadUrl(pathname: string): Promise<string> {
+  const client = getBlobServiceClient();
+  if (!client) {
+    return pathname.startsWith('http') ? pathname : `/api/fiscal-docs/download?pathname=${encodeURIComponent(pathname)}`;
+  }
+  const containerClient = client.getContainerClient(CONTAINER_NAME);
+  const blockBlobClient = containerClient.getBlockBlobClient(pathname);
+  return blockBlobClient.url;
+}
+
+export async function deleteBlob(pathname: string): Promise<boolean> {
+  const client = getBlobServiceClient();
+  if (!client) return true;
+  try {
+    const containerClient = client.getContainerClient(CONTAINER_NAME);
+    await containerClient.deleteBlob(pathname);
+    return true;
+  } catch (e) {
+    console.warn('[Azure Storage] Erro ao deletar blob:', e);
+    return false;
+  }
+}

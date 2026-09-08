@@ -1,57 +1,61 @@
-import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { EmailClient } from '@azure/communication-email';
+import { DefaultAzureCredential } from '@azure/identity';
 
+const CONNECTION_STRING = process.env.COMMUNICATION_SERVICES_CONNECTION_STRING || process.env.AZURE_COMMUNICATION_CONNECTION_STRING || '';
+const ENDPOINT = process.env.AZURE_COMMUNICATION_ENDPOINT || '';
+const SENDER = process.env.AZURE_EMAIL_SENDER || process.env.EMAIL_SENDER || 'DoNotReply@it2a.azurecomm.net';
 
-export async function sendEmail({ to, subject, html, text }: { to: string, subject: string, html: string, text?: string }) {
-  const SES_REGION = process.env.SES_REGION || process.env.REGION || "sa-east-1";
-  const SES_SENDER = process.env.SES_SENDER || "contato@it2a.com";
+let emailClientInstance: EmailClient | null = null;
 
-  const accessKeyId = process.env.SES_ACCESS_KEY_ID || process.env.ACCESS_KEY_ID || "";
-  const secretAccessKey = process.env.SES_SECRET_ACCESS_KEY || process.env.SECRET_ACCESS_KEY || "";
+function getEmailClient(): EmailClient | null {
+  if (emailClientInstance) return emailClientInstance;
 
-  if (!accessKeyId || !secretAccessKey) {
-    console.error(`[SES] ERRO FATAL: Credenciais AWS não encontradas no ambiente!`);
+  if (CONNECTION_STRING) {
+    emailClientInstance = new EmailClient(CONNECTION_STRING);
+  } else if (ENDPOINT) {
+    emailClientInstance = new EmailClient(ENDPOINT, new DefaultAzureCredential());
   }
 
-  const sesClient = new SESClient({
-    region: SES_REGION,
-    credentials: { accessKeyId, secretAccessKey },
-  });
+  return emailClientInstance;
+}
 
-  const params = {
-    Source: SES_SENDER,
+export async function sendEmail({
+  to,
+  subject,
+  html,
+  text,
+}: {
+  to: string;
+  subject: string;
+  html: string;
+  text?: string;
+}): Promise<{ success: boolean; messageId?: string }> {
+  const client = getEmailClient();
 
-    Destination: {
-      ToAddresses: [to],
-    },
-    Message: {
-      Subject: {
-        Data: subject,
-        Charset: "UTF-8",
-      },
-      Body: {
-        Html: {
-          Data: html,
-          Charset: "UTF-8",
-        },
-        Text: {
-          Data: text || subject,
-          Charset: "UTF-8",
-        },
-      },
-    },
-  };
+  if (!client) {
+    console.warn(`[Azure Email] AVISO: Nenhuma credencial do Azure Communication Services configurada (COMMUNICATION_SERVICES_CONNECTION_STRING). Simulando envio para ${to}`);
+    return { success: true, messageId: `mock-${Date.now()}` };
+  }
 
   try {
-    const command = new SendEmailCommand(params);
-    const result = await sesClient.send(command);
-    console.log(`[SES] Email sent to ${to}. MessageId: ${result.MessageId}`);
-    return { success: true, messageId: result.MessageId };
-  } catch (error: any) {
-    console.error(`[SES] Error sending email to ${to}:`, error);
-    // IMPORTANTE: Estamos lançando o erro para que o endpoint de signup saiba que falhou.
-    // Assim, podemos tratar o erro no frontend e não deixar o usuário "preso" sem e-mail.
-    throw new Error(`Falha ao enviar e-mail: ${error.message}`);
+    const poller = await client.beginSend({
+      senderAddress: SENDER,
+      content: {
+        subject,
+        plainText: text || subject,
+        html,
+      },
+      recipients: {
+        to: [{ address: to }],
+      },
+    });
 
+    const response = await poller.pollUntilDone();
+    console.log(`[Azure Email] E-mail enviado com sucesso para ${to}. ID: ${response.id}`);
+    return { success: true, messageId: response.id };
+  } catch (error: any) {
+    console.error(`[Azure Email] Erro ao enviar e-mail para ${to}:`, error);
+    throw new Error(`Falha no envio de e-mail via Azure: ${error.message}`);
   }
 }
 
