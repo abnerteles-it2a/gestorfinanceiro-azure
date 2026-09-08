@@ -1,0 +1,232 @@
+
+import { IncomingMessage, ServerResponse } from 'http';
+import { Pool } from 'pg';
+import { jwtVerify } from 'jose';
+
+// Use environment variables for connection
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
+
+const getSecret = (): string => String(process.env.NEON_AUTH_SECRET || process.env.STACK_SECRET_SERVER_KEY || 'dev-secret');
+
+const getBody = async (req: any): Promise<any> => {
+    if (req.body) return req.body;
+    return new Promise((resolve) => {
+        let body = '';
+        req.on('data', (chunk: any) => body += chunk);
+        req.on('end', () => {
+            try { resolve(JSON.parse(body)); } catch { resolve({}); }
+        });
+    });
+};
+
+export default async function handler(req: any, res: any) {
+    console.log(`[OrgAdmin] Request: ${req.method} ${req.url}`);
+
+    // Enable CORS
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    if (req.method === 'OPTIONS') {
+        res.statusCode = 200;
+        res.end();
+        return;
+    }
+
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+
+    if (!token) { 
+        console.log('[OrgAdmin] No token');
+        res.statusCode = 401; 
+        res.end(JSON.stringify({ error: 'Unauthorized' })); 
+        return; 
+    }
+    
+    let userId = '';
+    try {
+        const { payload } = await jwtVerify(token, new TextEncoder().encode(getSecret()));
+        userId = String(payload?.sub || '');
+    } catch (e) {
+        console.log('[OrgAdmin] Invalid token');
+        res.statusCode = 401; 
+        res.end(JSON.stringify({ error: 'Invalid token' })); 
+        return;
+    }
+
+    if (!userId) {
+        res.statusCode = 401;
+        res.end(JSON.stringify({ error: 'Unauthorized' }));
+        return;
+    }
+
+    // Check if user is Org Admin
+    const profileRes = await pool.query('SELECT org_id, is_admin FROM public.profiles WHERE user_id=$1', [userId]);
+    const profile = profileRes.rows[0];
+    
+    if (!profile || !profile.org_id) {
+         console.log('[OrgAdmin] No org');
+         res.statusCode = 403;
+         res.end(JSON.stringify({ error: 'No organization found' }));
+         return;
+    }
+
+    const orgId = profile.org_id;
+    
+    // Check if user is owner of the org or explicit admin
+    const memberRes = await pool.query('SELECT role FROM public.org_members WHERE org_id=$1 AND user_id=$2', [orgId, userId]);
+    const memberRole = memberRes.rows[0]?.role;
+
+    if (memberRole !== 'owner' && memberRole !== 'admin') {
+        console.log('[OrgAdmin] Insufficient permissions');
+        res.statusCode = 403;
+        res.end(JSON.stringify({ error: 'Insufficient permissions' }));
+        return;
+    }
+
+    if (req.method === 'POST') {
+        const body = await getBody(req);
+        const action = body.action;
+        console.log(`[OrgAdmin] Action: ${action}`);
+
+        try {
+            if (action === 'list_members') {
+                const members = await pool.query(`
+                    SELECT m.id, m.user_id, m.role, m.joined_at, p.email, p.full_name
+                    FROM public.org_members m
+                    LEFT JOIN public.profiles p ON m.user_id = p.user_id
+                    WHERE m.org_id=$1
+                    ORDER BY m.joined_at DESC
+                `, [orgId]);
+                res.statusCode = 200;
+                res.end(JSON.stringify({ members: members.rows }));
+                return;
+            }
+
+            if (action === 'list_org_cost_centers') {
+                const ccRes = await pool.query(`
+                    SELECT c.id, c.name, c.user_id, p.full_name as owner_name, p.email as owner_email
+                    FROM public.cost_centers c
+                    JOIN public.org_members m ON m.user_id = c.user_id
+                    LEFT JOIN public.profiles p ON p.user_id = c.user_id
+                    WHERE m.org_id = $1
+                    ORDER BY c.name ASC
+                `, [orgId]);
+                res.statusCode = 200;
+                res.end(JSON.stringify({ cost_centers: ccRes.rows }));
+                return;
+            }
+
+            if (action === 'get_user_permissions') {
+                const targetUserId = body.user_id;
+                if (!targetUserId) throw new Error('User ID required');
+
+                const permsRes = await pool.query(`
+                    SELECT id, cost_center_id, role 
+                    FROM public.cost_center_permissions
+                    WHERE org_id = $1 AND user_id = $2
+                `, [orgId, targetUserId]);
+                
+                res.statusCode = 200;
+                res.end(JSON.stringify({ permissions: permsRes.rows }));
+                return;
+            }
+
+            if (action === 'update_permission') {
+                const { user_id, cost_center_id, role } = body;
+                if (!user_id || !cost_center_id) throw new Error('Missing fields');
+                
+                if (!role || role === 'none') {
+                    await pool.query(`
+                        DELETE FROM public.cost_center_permissions 
+                        WHERE org_id=$1 AND user_id=$2 AND cost_center_id=$3
+                    `, [orgId, user_id, cost_center_id]);
+                } else {
+                    await pool.query(`
+                        INSERT INTO public.cost_center_permissions (org_id, user_id, cost_center_id, role)
+                        VALUES ($1, $2, $3, $4)
+                        ON CONFLICT (user_id, cost_center_id) 
+                        DO UPDATE SET role = EXCLUDED.role
+                    `, [orgId, user_id, cost_center_id, role]);
+                }
+                
+                res.statusCode = 200;
+                res.end(JSON.stringify({ success: true }));
+                return;
+            }
+
+            if (action === 'invite_member') {
+                const email = body.email;
+                if (!email) throw new Error('Email required');
+
+                const userRes = await pool.query('SELECT user_id FROM public.profiles WHERE email=$1', [email]);
+                let targetUserId = userRes.rows[0]?.user_id;
+
+                if (!targetUserId) {
+                     throw new Error('User not found. Ask them to sign up first.');
+                }
+
+                const check = await pool.query('SELECT id FROM public.org_members WHERE org_id=$1 AND user_id=$2', [orgId, targetUserId]);
+                if (check.rows.length > 0) throw new Error('User is already a member');
+
+                const orgRes = await pool.query('SELECT seats FROM public.organizations WHERE id=$1', [orgId]);
+                const seats = orgRes.rows[0]?.seats || 5;
+                const countRes = await pool.query('SELECT COUNT(*) as c FROM public.org_members WHERE org_id=$1', [orgId]);
+                const currentCount = Number(countRes.rows[0]?.c || 0);
+
+                if (currentCount >= seats) throw new Error('Organization seat limit reached');
+
+                await pool.query('INSERT INTO public.org_members (org_id, user_id, role) VALUES ($1, $2, $3)', [orgId, targetUserId, 'member']);
+                await pool.query('UPDATE public.profiles SET org_id=$1 WHERE user_id=$2 AND org_id IS NULL', [orgId, targetUserId]);
+
+                res.statusCode = 200;
+                res.end(JSON.stringify({ success: true }));
+                return;
+            }
+
+            if (action === 'remove_member') {
+                const targetUserId = body.user_id;
+                if (!targetUserId) throw new Error('User ID required');
+                if (targetUserId === userId) throw new Error('Cannot remove yourself');
+
+                const targetRoleRes = await pool.query('SELECT role FROM public.org_members WHERE org_id=$1 AND user_id=$2', [orgId, targetUserId]);
+                if (targetRoleRes.rows[0]?.role === 'owner') throw new Error('Cannot remove the owner');
+
+                await pool.query('DELETE FROM public.org_members WHERE org_id=$1 AND user_id=$2', [orgId, targetUserId]);
+                await pool.query('UPDATE public.profiles SET org_id=NULL WHERE user_id=$1 AND org_id=$2', [targetUserId, orgId]);
+
+                res.statusCode = 200;
+                res.end(JSON.stringify({ success: true }));
+                return;
+            }
+
+            if (action === 'update_member_role') {
+                 const { user_id, role } = body;
+                 if (!user_id || !role) throw new Error('Missing fields');
+                 if (user_id === userId) throw new Error('Cannot change your own role');
+                 
+                 // Only owner can change roles to admin/owner
+                 if (memberRole !== 'owner') {
+                     throw new Error('Only owner can manage roles');
+                 }
+
+                 await pool.query('UPDATE public.org_members SET role=$1 WHERE org_id=$2 AND user_id=$3', [role, orgId, user_id]);
+                 res.statusCode = 200;
+                 res.end(JSON.stringify({ success: true }));
+                 return;
+            }
+
+        } catch (e: any) {
+            console.error('Org Admin Action Error:', e);
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: e.message || 'Action failed' }));
+            return;
+        }
+    }
+
+    res.statusCode = 400;
+    res.end(JSON.stringify({ error: 'Unknown action or invalid method' }));
+}

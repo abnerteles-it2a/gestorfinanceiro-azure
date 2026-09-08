@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="/logo.png" />
+    <link rel="apple-touch-icon" href="/logo.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Controle suas finanças, investimentos, relatórios e fluxo de caixa com o Gestor Financeiro da IT2A." />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#020617" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Gestor Financeiro" />
+    <meta property="og:description" content="Gestor Financeiro Enterprise Ecosystem - Controle suas finanças, investimentos, relatórios e fluxo de caixa de forma inteligente com a IT2A." />
+    <meta property="og:image" content="/logo.png" />
+    <title>Gestor Financeiro</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+  </style>
+  <script>
+    try {
+      var t = localStorage.getItem('theme');
+      var d = t ? (t === 'dark') : true;
+      var root = document.documentElement;
+      var body = document.body;
+      if (d) { root.classList.add('dark'); body && body.classList.add('dark'); } else { root.classList.remove('dark'); body && body.classList.remove('dark'); }
+      root && root.setAttribute('data-theme', d ? 'dark' : 'light');
+      body && body.setAttribute('data-theme', d ? 'dark' : 'light');
+      if (root && root.style) root.style.colorScheme = d ? 'dark' : 'light';
+      if (body && body.style) body.style.colorScheme = d ? 'dark' : 'light';
+    } catch {}
+  </script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body class="bg-slate-50 dark:bg-slate-950">
+<div id="root"></div>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>

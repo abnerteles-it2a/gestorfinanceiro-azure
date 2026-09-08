@@ -1,0 +1,647 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Omie / it2a Exact Palette */
+  --color-omie-midnight: #001e2c;
+  --color-omie-sidebar: #020617;
+  --color-brand: #0D9488;
+  --color-omie-blue: #00B4D8;
+  --color-omie-bg: #E9EDF0;
+  --color-omie-border: #CBD5E1;
+  --color-omie-text: #1A1A2E;
+  --color-omie-text-muted: #64748b;
+
+  /* Enterprise High-Contrast Basis */
+  --color-white: #ffffff;
+
+  /* Clean Fintech Backdrop */
+  --color-slate-50: #f1f5f9;
+  --color-slate-100: #e2e8f0;
+  --color-slate-200: #cbd5e1;
+
+  /* Crisp Shadows for the "Portal" feel */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 40px rgba(0, 0, 0, 0.15);
+
+  /* Omie Specifics */
+  --omie-border: #CBD5E1;
+  --omie-bg: #E9EDF0;
+  --omie-active: #4F46E5;
+}
+
+/* Responsive density system: readable on phones, compact on notebooks and capped on wide monitors. */
+:root {
+  --app-content-max: 1680px;
+  --space-page: clamp(0.875rem, 1.4vw, 2rem);
+  --space-card: clamp(0.875rem, 1vw, 1.5rem);
+  --space-gap: clamp(0.625rem, 1vw, 1.25rem);
+  --control-height: clamp(2.5rem, 2.2vw, 2.75rem);
+  --text-ui: clamp(0.8125rem, 0.15vw + 0.76rem, 0.9375rem);
+  --text-data: clamp(0.875rem, 0.2vw + 0.8rem, 1rem);
+  --text-kpi: clamp(1.35rem, 1.2vw + 0.8rem, 2.25rem);
+}
+
+html {
+  font-size: clamp(13px, 0.18vw + 12.3px, 15px);
+}
+
+.app-content-limit { width: 100%; margin-inline: auto; max-width: 100%; }
+
+@media (min-width: 1024px) {
+  .app-content-limit { max-width: 1280px; }
+}
+
+@media (min-width: 1440px) {
+  .app-content-limit { max-width: 1440px; }
+}
+
+@media (min-width: 1920px) {
+  html { font-size: 15px; }
+  .app-content-limit { max-width: var(--app-content-max); }
+}
+
+@media (min-width: 1024px) and (max-width: 1439px) {
+  :root { --space-page: 1rem; --space-card: 1rem; --space-gap: 0.75rem; }
+  .kpi-value { font-size: clamp(1.2rem, 1.5vw, 1.8rem) !important; }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  :root { --space-page: 1rem; --space-card: 0.875rem; --space-gap: 0.75rem; }
+  .kpi-value { font-size: 1.45rem !important; }
+}
+
+@media (max-width: 767px) {
+  :root { --space-page: 0.875rem; --space-card: 0.875rem; --space-gap: 0.75rem; --control-height: 2.75rem; }
+  html { font-size: 14px; }
+}
+
+@media (max-width: 374px) {
+  html { font-size: 13px; }
+}
+
+@layer components {
+  /* Typography Scale - Enterprise Focused */
+  .text-display-lg {
+    @apply text-lg md:text-xl font-bold tracking-tight text-slate-900 dark:text-white leading-tight;
+  }
+
+  .text-display-sm {
+    @apply text-sm md:text-base font-bold tracking-tight text-slate-800 dark:text-slate-100 leading-snug;
+  }
+
+  .text-label-caps {
+    @apply text-[9px] md:text-[10px] font-black uppercase tracking-[0.1em] text-slate-500/80 dark:text-slate-400/80;
+  }
+
+  .text-data-primary {
+    @apply tabular-nums font-semibold tracking-tight text-slate-900 dark:text-white;
+  }
+
+  .text-data-secondary {
+    @apply tabular-nums font-medium text-slate-600 dark:text-slate-300;
+  }
+
+  .text-body-secondary {
+    @apply text-xs md:text-sm text-slate-500 dark:text-slate-400 leading-relaxed;
+  }
+
+  /* Omie Component Classes */
+  .omie-card {
+    @apply bg-white dark:bg-slate-900 border border-[#E0E7EF] dark:border-slate-800 rounded-xl shadow-sm;
+  }
+
+  .omie-card-header {
+    @apply px-5 py-4 border-b border-[#E0E7EF] dark:border-slate-800 bg-slate-50/30 dark:bg-slate-900/50 flex justify-between items-center;
+  }
+
+  /* High-Density Omie Tables */
+  .omie-table-container {
+    @apply bg-white border border-[#E0E7EF] rounded-xl overflow-hidden shadow-sm;
+  }
+
+  .omie-table {
+    @apply w-full text-left border-collapse;
+  }
+
+  .omie-table thead tr {
+    @apply bg-white border-b border-slate-100;
+  }
+
+  .omie-table th {
+    @apply px-3 py-2 md:px-5 md:py-3 lg:px-6 lg:py-4 text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap;
+  }
+
+  .omie-table tbody tr {
+    @apply border-b border-slate-50 hover:bg-slate-50/50 transition-colors;
+  }
+
+  .omie-table td {
+    @apply px-3 py-2 md:px-5 md:py-3 lg:px-6 lg:py-4 text-xs md:text-sm font-medium text-[#020617] tabular-nums;
+  }
+
+  .omie-table-summary {
+    @apply bg-slate-50/50 px-6 py-3 flex justify-end gap-10 border-t border-slate-100;
+  }
+
+  /* Omie Buttons */
+  .omie-btn-primary {
+    @apply px-8 py-2.5 text-[11px] font-black uppercase tracking-widest text-white bg-[#0D9488] hover:bg-[#0F766E] rounded-full shadow-md transition-all border-none cursor-pointer;
+  }
+
+  .omie-btn-secondary {
+    @apply px-8 py-2.5 text-[11px] font-black uppercase tracking-widest text-[#0D9488] bg-white border border-[#0D9488] hover:bg-teal-50 rounded-full transition-all cursor-pointer;
+  }
+
+  /* Omie Inputs */
+  .omie-input {
+    @apply w-full px-5 py-3 rounded-xl border border-slate-200 bg-white text-slate-700 outline-none focus:ring-2 focus:ring-[#0D9488]/20 focus:border-[#0D9488] transition-all text-sm;
+  }
+
+  .omie-label {
+    @apply block text-[10px] font-black text-slate-400 uppercase mb-2 tracking-widest;
+  }
+
+  /* Omie Modal Classes */
+  .omie-modal-overlay {
+    @apply fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-[#020617]/40 backdrop-blur-sm;
+    animation: fadeIn 0.4s ease-out forwards;
+  }
+
+  .omie-modal-content {
+    @apply bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col;
+    animation: portalEnter 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+
+  .omie-modal-header {
+    @apply p-4 md:p-6 lg:p-8 border-b border-slate-100 flex justify-between items-center;
+  }
+
+  .omie-modal-title {
+    @apply text-lg md:text-xl lg:text-2xl font-black text-[#0D9488] uppercase tracking-tight;
+  }
+
+  .omie-modal-body {
+    @apply p-4 md:p-6 lg:p-10 overflow-y-auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0,0,0,0.1) transparent;
+  }
+
+  .omie-modal-footer {
+    @apply p-3 md:p-5 lg:p-8 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-4;
+  }
+
+  .calendar-sidebar-override {
+    @apply !bg-slate-800/40 !p-2 !shadow-none !border-none !rounded-xl;
+  }
+
+  .calendar-sidebar-override .text-sm {
+    @apply !text-[11.5px];
+  }
+
+  .calendar-sidebar-override .text-xs {
+    @apply !text-[10px];
+  }
+
+  .calendar-sidebar-override .h-10 {
+    @apply !h-7.5 !w-auto;
+  }
+
+  .calendar-sidebar-override .grid-cols-7 {
+    @apply !gap-0.5;
+  }
+
+  .calendar-sidebar-override .text-gray-900,
+  .calendar-sidebar-override .text-gray-700 {
+    @apply !text-slate-300;
+  }
+
+  .calendar-sidebar-override .bg-gray-100 {
+    @apply !bg-slate-800/30;
+  }
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #E9EDF0;
+  color: #1A1A2E;
+}
+
+/* Omie-Style Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* Sidebar scrollbar — thinner, darker */
+.custom-scrollbar-sidebar::-webkit-scrollbar {
+  width: 3px;
+}
+.custom-scrollbar-sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar-sidebar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+.custom-scrollbar-sidebar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Ajuste de contraste: placeholders em modais no modo escuro */
+.dark .modal input::placeholder,
+.dark .modal textarea::placeholder {
+  color: #9CA3AF;
+  opacity: 1;
+}
+
+/* Ajuste global de placeholders em modo escuro */
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #D1D5DB;
+  opacity: 1;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+
+.animate-fade-in-up {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+@keyframes portalEnter {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+.animate-portal-enter {
+  animation: portalEnter 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Premium Mesh Grid Pattern */
+.bg-mesh-grid {
+  background-image: radial-gradient(#cbd5e1 0.5px, transparent 0.5px);
+  background-size: 24px 24px;
+}
+
+.dark .bg-mesh-grid {
+  background-image: radial-gradient(#1e293b 0.5px, transparent 0.5px);
+}
+
+/* Premium Transitions */
+.transition-glass {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ===== SPATIAL / GLASSMORPHISM UI TEST ===== */
+.bg-spatial {
+  /* Arquitetura premium / abstração de luxo */
+  background-image: url('https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?q=80&w=2070&auto=format&fit=crop');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+}
+
+.dark .glass-panel {
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+}
+
+.glass-sidebar {
+  background: rgba(2, 6, 23, 0.7) !important;
+  backdrop-filter: blur(30px) saturate(150%);
+  -webkit-backdrop-filter: blur(30px) saturate(150%);
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* ===== MODULE COLOR UTILITIES (reads --module-color CSS var) ===== */
+.module-accent-bg   { background-color: var(--module-color, #0D9488) !important; }
+.module-accent-text { color: var(--module-color, #0D9488) !important; }
+.module-accent-border { border-color: var(--module-color, #0D9488) !important; }
+.module-accent-border-b { border-bottom-color: var(--module-color, #0D9488) !important; }
+.module-accent-border-l { border-left-color: var(--module-color, #0D9488) !important; }
+.hover\:module-accent-border:hover { border-color: var(--module-color, #0D9488) !important; }
+.hover\:module-accent-text:hover   { color: var(--module-color, #0D9488) !important; }
+.focus\:module-accent-ring:focus   { --tw-ring-color: var(--module-color, #0D9488); }
+
+
+/* ===== HOME LAUNCHPAD ===== */
+
+.omie-home-container {
+  width: 100%;
+  min-height: 100%;
+}
+
+.omie-module-card {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.omie-module-card:hover {
+  transform: translateY(-4px) scale(1.03);
+  box-shadow: 0 20px 40px -8px rgba(0, 0, 0, 0.4) !important;
+  filter: brightness(1.1);
+}
+
+.omie-module-card:active {
+  transform: scale(0.97);
+}
+
+/* Home launchpad remains compact on notebooks and stacks market panels on phones. */
+@media (max-width: 767px) {
+  .home-launchpad-layout { flex-direction: column; }
+  .home-launchpad-grid { width: 100%; flex: none !important; justify-content: space-between; }
+  .home-launchpad-layout > :not(.home-launchpad-grid) { width: 100%; }
+  .home-launchpad-footer { flex-direction: column; align-items: flex-start !important; gap: 0.5rem; padding-top: 2rem !important; font-size: 9px !important; letter-spacing: 0.1em !important; }
+}
+
+/* ===== OMIE PORTAL SYSTEM ===== */
+
+.omie-topbar {
+  height: clamp(40px, 3.5vw + 28px, 52px) !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 clamp(8px, 1.2vw + 4px, 20px);
+  color: white;
+  z-index: 1000;
+  position: relative;
+}
+
+.omie-module-bar {
+  height: 40px;
+  background: white;
+  border-bottom: 2px solid var(--color-brand);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  z-index: 900;
+  position: relative;
+}
+
+.dark .omie-module-bar {
+  background: #020617;
+  border-bottom-color: #0D9488;
+}
+
+.omie-topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.omie-topbar-sep {
+  display: inline-block;
+  width: 1px;
+  height: 20px;
+  background: rgba(255,255,255,0.1);
+}
+
+.omie-module-tab {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  background: var(--color-brand);
+  color: white;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: 4px 4px 0 0;
+}
+
+.omie-sidebar {
+  width: clamp(48px, 4vw, 60px) !important;
+  background: var(--color-omie-sidebar);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  z-index: 500;
+  flex-shrink: 0;
+}
+
+.omie-sidebar-item {
+  width: clamp(48px, 4vw, 60px);
+  height: clamp(48px, 4vw, 60px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255,255,255,0.5);
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* Fluid expanded sidebar — scales with root font-size (rem-based) */
+.app-sidebar-expanded {
+  width: clamp(180px, 12vw + 80px, 256px);
+}
+
+.omie-sidebar-item:hover {
+  background: rgba(255,255,255,0.05);
+  color: white;
+}
+
+.omie-sidebar-item.active {
+  background: var(--color-brand);
+  color: white;
+}
+
+.print-only {
+  display: none;
+}
+
+@media print {
+  @page {
+    margin: 15mm 12mm;
+    size: auto;
+  }
+
+  *, *::before, *::after {
+    background-color: transparent !important;
+    color: #000 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    transition: none !important;
+  }
+
+  .text-white, .bg-indigo-600, .bg-slate-900, .dark\:text-white {
+    color: #000 !important;
+  }
+
+  .bg-indigo-600, .bg-slate-900 {
+    background-color: #f1f5f9 !important;
+    border: 1px solid #cbd5e1 !important;
+  }
+
+  body {
+    background: #ffffff !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .no-print,
+  aside,
+  nav,
+  header,
+  .chatbot-bubble,
+  .help-chatbot,
+  button,
+  [role="button"],
+  .app-sidebar,
+  .app-topbar {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    height: 0 !important;
+    width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    position: absolute !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  html, body, #root, .app-container, main {
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    position: static !important;
+  }
+
+  .overflow-x-auto, .overflow-y-auto, .overflow-hidden,
+  [class*="overflow-"], [class*="max-h-"], [class*="h-screen"], [class*="min-h-screen"] {
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
+    scrollbar-width: none !important;
+  }
+
+  *::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+
+  img, svg, tr, .KpiCard, .break-inside-avoid {
+    break-inside: avoid !important;
+  }
+
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    table-layout: auto !important;
+    margin-bottom: 20px !important;
+  }
+
+  thead { display: table-header-group !important; }
+
+  th, td {
+    border: 1px solid #e2e8f0 !important;
+    padding: 8px !important;
+    word-wrap: break-word !important;
+  }
+
+  .bg-emerald-500, .text-emerald-600 { color: #059669 !important; border-color: #10b981 !important; }
+  .bg-red-500, .text-red-600 { color: #dc2626 !important; border-color: #ef4444 !important; }
+  .bg-amber-500, .text-amber-600 { color: #d97706 !important; border-color: #f59e0b !important; }
+}
+
+/* ===== MEDIUM DENSITY — 768px to 1280px ===================================
+   Prevents the "everything looks huge" effect on tablets & small laptops.
+   Elements reorder correctly but sizes stay proportional.
+   ========================================================================== */
+@media (min-width: 768px) and (max-width: 1280px) {
+
+  /* Sidebar nav item height — slightly tighter */
+  .app-sidebar-expanded nav button { height: 2.2rem; }
+
+  /* KPI large values — scale down gracefully */
+  .kpi-value { font-size: clamp(1.2rem, 2.5vw, 2.25rem) !important; }
+
+  /* Card grids — tighter gaps on medium screens */
+  .gap-6 { gap: clamp(0.75rem, 2vw, 1.5rem); }
+  .gap-8 { gap: clamp(1rem,   2.5vw, 2rem);  }
+
+  /* Modal — ensure it fits without overflow */
+  .omie-modal-content { max-height: 92vh; }
+
+  /* Section headings — reduce scale slightly */
+  .omie-module-bar { height: 36px !important; }
+}
+
+/* ===== SMALL SCREENS < 768px — full mobile stack ========================= */
+@media (max-width: 767px) {
+  body { overflow-x: hidden; }
+
+  /* Modal full-screen bottom-sheet style */
+  .omie-modal-content {
+    max-width: 100vw !important;
+    max-height: 95dvh !important;
+    border-radius: 1.25rem 1.25rem 0 0 !important;
+    margin-top: auto;
+  }
+  .omie-modal-overlay { align-items: flex-end !important; padding: 0 !important; }
+
+  /* Touch targets and form controls keep their physical size despite compact type. */
+  button, [role="button"], input, select, textarea { min-height: 44px; }
+  input, select, textarea { font-size: max(16px, var(--text-ui)); }
+
+  .omie-card, .omie-table-container { border-radius: 0.875rem; }
+  .omie-card-header { padding: var(--space-card); }
+  .omie-table th { padding: 0.625rem 0.75rem; }
+  .omie-table td { padding: 0.75rem; font-size: var(--text-data); }
+  .omie-table-summary { padding: 0.75rem; gap: 0.75rem; }
+
+  .responsive-tab-strip {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+  .responsive-tab-strip::-webkit-scrollbar { display: none; }
+  .responsive-tab-strip > button { flex: 0 0 auto !important; min-width: max-content !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+
