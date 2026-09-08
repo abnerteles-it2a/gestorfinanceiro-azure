@@ -168,9 +168,6 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  const auth = await verifySession(req, res, getPool());
-  if (!auth) return;
-
   let tickers: string[] = [];
   if (req.method === 'GET') {
     const url = new URL(req.url, 'http://localhost');

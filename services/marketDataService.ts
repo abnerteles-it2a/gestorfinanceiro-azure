@@ -241,6 +241,64 @@ export const getMarketData = async (tickers: string[], force: boolean = false): 
         return { data: resultData, sources: [] };
     }
 
+    // Primary: Call unified Azure backend endpoint /api/portfolio/market-data
+    try {
+        const token = typeof window !== 'undefined' ? (window.localStorage.getItem('auth_token') || window.localStorage.getItem('session_token') || '') : '';
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        const backendRes = await fetch(`/api/portfolio/market-data?tickers=${encodeURIComponent(tickersToFetch.join(','))}`, {
+            method: 'GET',
+            headers
+        });
+
+        if (backendRes.ok) {
+            const json = await backendRes.json();
+            if (json && json.data && Object.keys(json.data).length > 0) {
+                Object.entries(json.data).forEach(([t, item]: [string, any]) => {
+                    if (item && item.price > 0) {
+                        const info: MarketInfo = {
+                            price: item.price,
+                            change: item.change ?? 0,
+                            changePercent: item.changePercent ?? 0,
+                            signal: item.signal ?? 'Manter',
+                            decision: item.decision,
+                            decisionLabel: item.decisionLabel,
+                            grahamPrice: item.grahamPrice,
+                            grahamMargin: item.grahamMargin,
+                            bazinPrice: item.bazinPrice,
+                            bazinMargin: item.bazinMargin,
+                            dividendYield: item.dividendYield,
+                            dividends12m: item.dividends12m,
+                            priceEarnings: item.priceEarnings,
+                            priceToBook: item.priceToBook,
+                            lpa: item.lpa,
+                            vpa: item.vpa,
+                            logourl: item.logourl,
+                            fiftyTwoWeekHigh: item.fiftyTwoWeekHigh,
+                            fiftyTwoWeekLow: item.fiftyTwoWeekLow,
+                            shortName: item.shortName,
+                            longName: item.longName,
+                            valuation: item.valuation
+                        };
+                        resultData[t] = info;
+                        tickerCache[t] = { data: info, timestamp: now };
+                    }
+                });
+
+                const remaining = tickersToFetch.filter(t => !resultData[t] || resultData[t].price === 0);
+                if (remaining.length === 0) {
+                    return {
+                        data: resultData,
+                        sources: [{ uri: '/api/portfolio/market-data', title: 'Azure Financial Market Data Engine (Brapi + Valuation)' }]
+                    };
+                }
+            }
+        }
+    } catch (err) {
+        console.warn('Backend market-data fetch failed, falling back to client fetchers:', err);
+    }
+
     const b3 = tickersToFetch.filter(isB3Ticker);
     // Explicitly add ^BVSP to B3 if requested
     if (tickersToFetch.includes('^BVSP') && !b3.includes('^BVSP')) b3.push('^BVSP');
