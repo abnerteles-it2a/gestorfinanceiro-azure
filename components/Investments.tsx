@@ -7,21 +7,43 @@ import type { Investment, FixedIncomeInvestment, AnyInvestment } from '../types'
 import { AssetType } from '../types';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip as RechartsTooltip } from 'recharts';
 import { KpiCard } from './KpiCard';
-import { InvTabBar, DividendsPanel, PerformancePanel } from './InvestmentTabs';
+import { InvTabBar, DividendsPanel, PerformancePanel, type InvTab } from './InvestmentTabs';
+import { InvestmentSimulator } from './InvestmentSimulator';
 import { UpgradeScreen } from './UpgradeScreen';
 
-type InvTab = 'carteira' | 'proventos' | 'rentabilidade';
-
-const SignalBadge: React.FC<{ signal: 'Comprar' | 'Vender' | 'Manter' | undefined }> = ({ signal }) => {
-    if (!signal) return null;
-    const colors = {
-        'Comprar': 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
-        'Vender': 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
-        'Manter': 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
+const SignalBadge: React.FC<{
+    signal?: 'Comprar' | 'Vender' | 'Manter';
+    valuation?: {
+        recommendation?: 'COMPRA_FORTE' | 'COMPRA' | 'MANTER' | 'AGUARDAR' | 'DESCONHECIDO';
+        grahamValue?: number | null;
+        bazinPrice?: number | null;
+        safetyMarginPct?: number | null;
+        reason?: string;
     };
+}> = ({ signal, valuation }) => {
+    const rec = valuation?.recommendation || (signal === 'Comprar' ? 'COMPRA' : signal === 'Vender' ? 'AGUARDAR' : signal === 'Manter' ? 'MANTER' : undefined);
+    if (!rec) return null;
+
+    const styles: Record<string, { label: string; bg: string; text: string; border: string }> = {
+        'COMPRA_FORTE': { label: 'Compra Forte', bg: 'bg-emerald-500/15', text: 'text-emerald-700 dark:text-emerald-300 font-black', border: 'border-emerald-500/30' },
+        'COMPRA': { label: 'Comprar', bg: 'bg-teal-500/10', text: 'text-teal-700 dark:text-teal-300 font-bold', border: 'border-teal-500/20' },
+        'MANTER': { label: 'Manter', bg: 'bg-amber-500/10', text: 'text-amber-700 dark:text-amber-300 font-bold', border: 'border-amber-500/20' },
+        'AGUARDAR': { label: 'Aguardar', bg: 'bg-rose-500/10', text: 'text-rose-700 dark:text-rose-300 font-bold', border: 'border-rose-500/20' },
+        'DESCONHECIDO': { label: 'Neutro', bg: 'bg-slate-500/10', text: 'text-slate-600 dark:text-slate-400 font-medium', border: 'border-slate-500/20' }
+    };
+
+    const cfg = styles[rec] || styles['DESCONHECIDO'];
+    const title = valuation?.reason
+        ? `${valuation.reason}${valuation.bazinPrice ? ` | Bazin: R$ ${valuation.bazinPrice.toFixed(2)}` : ''}${valuation.grahamValue ? ` | Graham: R$ ${valuation.grahamValue.toFixed(2)}` : ''}`
+        : cfg.label;
+
     return (
-        <span className={`px-2 py-0.5 text-[9px] font-black uppercase tracking-widest rounded-md border ${colors[signal]}`}>
-            {signal}
+        <span
+            title={title}
+            className={`inline-flex items-center gap-1 px-2 py-0.5 text-[9px] uppercase tracking-wider rounded-md border ${cfg.bg} ${cfg.text} ${cfg.border} cursor-help transition-all hover:scale-105`}
+        >
+            <span className="w-1.5 h-1.5 rounded-full bg-current opacity-80" />
+            {cfg.label}
         </span>
     );
 };
@@ -79,7 +101,7 @@ const VariableAssetTable: React.FC<{ title: string; assets: Investment[]; onEdit
                                             </div>
                                         </td>
                                         <td className="p-3 whitespace-nowrap">
-                                            <SignalBadge signal={signal} />
+                                            <SignalBadge signal={signal} valuation={marketData[inv.ticker]?.valuation} />
                                         </td>
                                         <td className="p-3 text-[11px] font-medium text-gray-600 dark:text-gray-300 text-right whitespace-nowrap tabular-nums">{formatCurrency(currentPrice)}</td>
                                         <td className="p-3 text-right whitespace-nowrap">
@@ -144,7 +166,7 @@ const VariableAssetTable: React.FC<{ title: string; assets: Investment[]; onEdit
                                         <div className="font-medium text-gray-900 dark:text-white">{inv.ticker}</div>
                                         <div className="text-xs text-gray-500 dark:text-gray-400">{inv.type}</div>
                                     </div>
-                                    <SignalBadge signal={signal} />
+                                    <SignalBadge signal={signal} valuation={marketData[inv.ticker]?.valuation} />
                                 </div>
                                 <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                                     <span className="text-gray-500 dark:text-gray-400">Preço Atual</span>
@@ -567,6 +589,7 @@ const Investments: React.FC<InvestmentsProps> = ({ onEditInvestment }) => {
 
             {activeTab === 'proventos' && <DividendsPanel />}
             {activeTab === 'rentabilidade' && <PerformancePanel />}
+            {activeTab === 'simulador' && <InvestmentSimulator />}
             {activeTab === 'carteira' && <>
             <PortfolioHub 
                 totalInvested={totalInvested}

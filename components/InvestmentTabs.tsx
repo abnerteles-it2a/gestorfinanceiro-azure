@@ -5,7 +5,7 @@ import { AssetType } from '../types';
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
-type InvTab = 'carteira' | 'proventos' | 'rentabilidade';
+export type InvTab = 'carteira' | 'proventos' | 'rentabilidade' | 'simulador';
 
 interface DividendItem {
   ticker: string;
@@ -43,6 +43,7 @@ export const InvTabBar: React.FC<{ active: InvTab; onChange: (t: InvTab) => void
     { id: 'carteira', label: 'Carteira', icon: '📊' },
     { id: 'proventos', label: 'Proventos', icon: '💰' },
     { id: 'rentabilidade', label: 'Rentabilidade', icon: '📈' },
+    { id: 'simulador', label: 'Simulador IA', icon: '🤖' },
   ];
   return (
     <div className="flex gap-1 bg-slate-100/60 dark:bg-slate-900/60 p-1 rounded-2xl border border-slate-200 dark:border-slate-800 w-fit">

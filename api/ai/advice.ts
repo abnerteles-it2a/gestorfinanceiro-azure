@@ -109,7 +109,53 @@ Texto do Usuário: "${txCtxObj.text}"`;
           paymentMethod: parsed.paymentMethod || 'PIX',
           costCenterId: parsed.costCenterId || undefined,
         };
-        text = `Transação identificada: ${transaction.type} de ${formatCurrency(transaction.amount)} em "${transaction.category}" (${transaction.description}).`;
+      } else if (kind === 'investment_simulator') {
+        const simData = input?.simulation || ctx?.simulation || {};
+        const targetTicker = String(simData.ticker || questionRaw || '').toUpperCase();
+        const targetAmount = Number(simData.amount || 0);
+        const currentPrice = Number(simData.price || 0);
+        const bazinPrice = Number(simData.bazinPrice || 0);
+        const grahamPrice = Number(simData.grahamPrice || 0);
+        const dy = Number(simData.dividendYield || 0);
+        const portfolio = Array.isArray(ctx.assets) ? ctx.assets : [];
+        const totalInvested = Number(ctx.totalInvested || 0);
+        const newTotal = totalInvested + targetAmount;
+
+        const currentAsset = portfolio.find((a: any) => String(a.ticker).toUpperCase() === targetTicker);
+        const currentAssetTotal = Number(currentAsset?.total || currentAsset?.currentValue || (Number(currentAsset?.quantity || 0) * currentPrice));
+        const newAssetTotal = currentAssetTotal + targetAmount;
+        const currentPercent = totalInvested > 0 ? ((currentAssetTotal / totalInvested) * 100).toFixed(1) : '0.0';
+        const newPercent = newTotal > 0 ? ((newAssetTotal / newTotal) * 100).toFixed(1) : '100.0';
+
+        const prompt = `Você é o Agente Sênior de Decisão de Investimentos do Gestor Financeiro.
+O usuário está avaliando realizar um novo aporte e quer saber: "Devo Comprar?".
+
+Dados do Aporte Pretendido:
+- Ativo: ${targetTicker}
+- Cotação Atual: ${formatCurrency(currentPrice)}
+- Valor a Aportar: ${formatCurrency(targetAmount)}
+- Preço Teto Bazin (DY min 6%): ${bazinPrice > 0 ? formatCurrency(bazinPrice) : 'n/d'}
+- Preço Justo Graham: ${grahamPrice > 0 ? formatCurrency(grahamPrice) : 'n/d'}
+- Dividend Yield 12M: ${dy.toFixed(2)}%
+
+Impacto na Carteira:
+- Patrimônio Investido Atual: ${formatCurrency(totalInvested)} -> Novo Patrimônio: ${formatCurrency(newTotal)}
+- Concentração em ${targetTicker}: de ${currentPercent}% para ${newPercent}%
+
+Instruções:
+Gere uma análise institucional e rigorosa contendo:
+1. **Veredito Claro:** (COMPRA RECOMENDADA, COMPRA PARCIAL/MODERADA ou AGUARDAR MELHOR PONTO).
+2. **Avaliação de Preço vs Valuation:** Análise fundamentalista de preço vs Bazin/Graham e dividend yield.
+3. **Análise de Risco & Concentração:** Avalie se ${newPercent}% de peso na carteira está saudável (acima de 20% em único ativo é risco alto).
+4. **Plano Tático de Entrada:** Sugestão prática (comprar a mercado, fracionar ordens ou aguardar correção).`;
+
+        text = await askAzureOpenAI({
+          messages: [
+            { role: 'system', content: 'Você é um estrategista de alocação de carteiras (CFA). Seja técnico, objetivo, encorajador e direto ao ponto com formatação limpa em markdown.' },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0.3,
+        });
       } else if (kind === 'investment') {
         const prompt = `Você é o Consultor de Investimentos do Gestor Financeiro. Analise a carteira do usuário e gere recomendações claras e prescritivas:
 - Diagnóstico da carteira e alocação atual vs perfil informado.

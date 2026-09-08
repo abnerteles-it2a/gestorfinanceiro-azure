@@ -9,10 +9,30 @@ export interface MarketInfo {
     change: number;
     changePercent?: number;
     signal: 'Comprar' | 'Vender' | 'Manter';
+    decision?: 'COMPRA_FORTE' | 'COMPRA' | 'MANTER' | 'AGUARDAR';
+    decisionLabel?: string;
+    grahamPrice?: number;
+    grahamMargin?: number;
+    bazinPrice?: number;
+    bazinMargin?: number;
+    dividendYield?: number;
+    dividends12m?: number;
     priceEarnings?: number;
+    priceToBook?: number;
+    lpa?: number;
+    vpa?: number;
     logourl?: string;
     fiftyTwoWeekHigh?: number;
     fiftyTwoWeekLow?: number;
+    shortName?: string;
+    longName?: string;
+    valuation?: {
+        grahamValue?: number | null;
+        bazinPrice?: number | null;
+        safetyMarginPct?: number | null;
+        recommendation?: 'COMPRA_FORTE' | 'COMPRA' | 'MANTER' | 'AGUARDAR' | 'DESCONHECIDO';
+        reason?: string;
+    };
 }
 
 export interface MarketData {
@@ -1696,3 +1716,34 @@ export const subscribeToMarketUpdates = (_tickers: string[], _callback: (data: M
 const brapiBase = (): string => {
     return '/proxy/brapi';
 };
+
+export const simulateInvestmentPurchase = async (simulation: {
+    ticker: string;
+    amount: number;
+    price?: number;
+    bazinPrice?: number;
+    grahamPrice?: number;
+    dividendYield?: number;
+}, context: {
+    totalInvested: number;
+    assets: any[];
+}): Promise<{ text: string; provider?: string; model?: string }> => {
+    const token = typeof window !== 'undefined' ? (window.localStorage.getItem('gestor_financeiro_app_token') || window.localStorage.getItem('financeplus_app_token')) : null;
+    const res = await fetch('/api/ai/advice', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+            kind: 'investment_simulator',
+            simulation,
+            context
+        })
+    });
+    if (!res.ok) {
+        throw new Error(`Falha ao simular aporte: ${res.statusText}`);
+    }
+    return await res.json();
+};
+

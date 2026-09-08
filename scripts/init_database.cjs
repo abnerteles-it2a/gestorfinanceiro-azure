@@ -1,23 +1,13 @@
-import { Pool } from 'pg';
+const { Pool } = require('pg');
 
-let pool: Pool | null = null;
-const getPool = () => {
-  if (!pool) {
-    const rawConnectionString = process.env.NEON_DATABASE_URL || process.env.DATABASE_URL;
-    const connectionString = rawConnectionString ? rawConnectionString.replace('?sslmode=require', '') : rawConnectionString;
-    pool = new Pool({ 
-      connectionString,
-      ssl: { rejectUnauthorized: false }
-    });
-    // Ensure UTF-8 encoding for all connections
-    pool.on('connect', (client) => {
-      client.query('SET client_encoding = "UTF8"').catch(e => console.error('Failed to set client_encoding:', e));
-    });
-  }
-  return pool;
-};
+const connectionString = process.env.DATABASE_URL || 'postgresql://aiopsadmin:P%40ssw0rdAIOps2026%21Secure@psql-aiops-prod-brsouth.postgres.database.azure.com:5432/gestorfinanceiro_staging?sslmode=require';
 
-const sqls: string[] = [
+const pool = new Pool({
+  connectionString,
+  ssl: { rejectUnauthorized: false }
+});
+
+const sqls = [
   'create table if not exists public.accounts (id uuid primary key, user_id uuid not null, name text not null, bank text, initial_balance numeric(14,2) default 0, created_at timestamptz default now())',
   'create index if not exists idx_accounts_user on public.accounts(user_id)',
   'create index if not exists idx_accounts_user_name on public.accounts(user_id, name)',
@@ -78,17 +68,39 @@ const sqls: string[] = [
   'create unique index if not exists mei_tax_obligations_org_unique on public.mei_tax_obligations (org_id, reference_year, reference_month, obligation_type) where org_id is not null'
 ];
 
-export default async function handler(req: any, res: any) {
-  try {
-    for (const s of sqls) {
-      try { await getPool().query(s); } catch {}
+async function main() {
+  console.log('--- Conectando ao Azure PostgreSQL gestorfinanceiro_staging ---');
+  const client = await pool.connect();
+  console.log('Conexão estabelecida com sucesso!');
+
+  console.log(`Aplicando ${sqls.length} instruções DDL de inicialização...`);
+  let successCount = 0;
+  for (const s of sqls) {
+    try {
+      await client.query(s);
+      successCount++;
+    } catch (err) {
+      console.warn('Erro ao executar DDL (ignorado se já existente):', err.message);
     }
-    res.statusCode = 200;
-    res.setHeader('content-type','application/json');
-    res.end(JSON.stringify({ ok: true }));
-  } catch (e: any) {
-    res.statusCode = 500;
-    res.setHeader('content-type','application/json');
-    res.end(JSON.stringify({ error: e?.message || 'error' }));
   }
+  console.log(`Sucesso: ${successCount} DDLs processadas.`);
+
+  // Listar tabelas criadas no schema public
+  const res = await client.query(`
+    SELECT table_name 
+    FROM information_schema.tables 
+    WHERE table_schema = 'public' 
+    ORDER BY table_name;
+  `);
+  console.log('Tabelas verificadas no banco:');
+  res.rows.forEach(r => console.log(` - ${r.table_name}`));
+
+  client.release();
+  await pool.end();
+  console.log('--- Inicialização concluída com sucesso! ---');
 }
+
+main().catch(err => {
+  console.error('Falha na inicialização do banco:', err);
+  process.exit(1);
+});
