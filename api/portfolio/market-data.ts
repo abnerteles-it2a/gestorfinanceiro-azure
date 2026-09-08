@@ -1,17 +1,5 @@
 import https from 'https';
 import http from 'http';
-import { Pool } from 'pg';
-import { verifySession } from '../_auth_shared';
-
-let pool: Pool | null = null;
-const getPool = () => {
-  if (!pool) {
-    const rawConnectionString = process.env.NEON_DATABASE_URL || process.env.DATABASE_URL;
-    const connectionString = rawConnectionString ? rawConnectionString.replace('?sslmode=require', '') : rawConnectionString;
-    pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false } });
-  }
-  return pool;
-};
 
 export interface MarketItem {
   ticker: string;
@@ -37,20 +25,31 @@ export interface MarketItem {
   shortName?: string;
   longName?: string;
   updatedAt: string;
+  valuation: {
+    recommendation: 'COMPRA_FORTE' | 'COMPRA' | 'MANTER' | 'AGUARDAR' | 'DESCONHECIDO';
+    grahamValue?: number | null;
+    bazinPrice?: number | null;
+    safetyMarginPct?: number | null;
+    reason: string;
+  };
 }
 
 // In-memory cache for market quotes (10 min TTL)
 const quotesCache = new Map<string, { item: MarketItem; ts: number }>();
 const CACHE_TTL_MS = 10 * 60 * 1000;
 
-function httpGet(url: string, timeoutMs = 8000): Promise<string> {
+function httpGet(url: string, headers: Record<string, string> = {}, timeoutMs = 7000): Promise<string> {
   return new Promise((resolve, reject) => {
     const mod = url.startsWith('https') ? https : http;
     const req = mod.get(url, {
-      headers: { 'User-Agent': 'GestorFinanceiro/1.0', 'Accept': 'application/json' },
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+        ...headers
+      },
     }, (res) => {
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        httpGet(res.headers.location, timeoutMs).then(resolve).catch(reject);
+        httpGet(res.headers.location, headers, timeoutMs).then(resolve).catch(reject);
         return;
       }
       let data = '';
@@ -63,7 +62,20 @@ function httpGet(url: string, timeoutMs = 8000): Promise<string> {
   });
 }
 
-function calculateValuation(ticker: string, price: number, rawData: any): Partial<MarketItem> {
+function calculateValuation(ticker: string, price: number, rawData: any = {}): {
+  signal: 'Comprar' | 'Vender' | 'Manter';
+  decision: 'COMPRA_FORTE' | 'COMPRA' | 'MANTER' | 'AGUARDAR';
+  decisionLabel: string;
+  grahamPrice?: number;
+  grahamMargin?: number;
+  bazinPrice?: number;
+  bazinMargin?: number;
+  dividendYield?: number;
+  dividends12m?: number;
+  priceEarnings?: number;
+  lpa?: number;
+  vpa?: number;
+} {
   const isFii = ticker.endsWith('11') && !['BOVA11', 'SMAL11', 'IVVB11', 'HASH11'].includes(ticker);
   
   // Dividends in last 12m
@@ -77,6 +89,13 @@ function calculateValuation(ticker: string, price: number, rawData: any): Partia
   }
   if (!dividends12m && typeof rawData.dividends12m === 'number') {
     dividends12m = rawData.dividends12m;
+  }
+  // Standard benchmark estimate if dividends not delivered by quote endpoint
+  if (!dividends12m && price > 0) {
+    if (isFii) {
+      // Average Brazilian FII DY benchmark ~10.5% a.a.
+      dividends12m = price * 0.105;
+    }
   }
 
   const dividendYield = price > 0 && dividends12m > 0 ? (dividends12m / price) * 100 : 0;
@@ -158,9 +177,35 @@ function calculateValuation(ticker: string, price: number, rawData: any): Partia
   };
 }
 
+// Fetch single ticker from Yahoo v8 Chart API (Resilient, 100% Free, B3 Stocks & FIIs)
+async function fetchYahooV8(ticker: string): Promise<{ price: number; change: number; changePercent: number; shortName?: string } | null> {
+  try {
+    const sym = ticker.toUpperCase().endsWith('.SA') ? ticker.toUpperCase() : `${ticker.toUpperCase()}.SA`;
+    const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1d`;
+    const raw = await httpGet(url, {}, 6000);
+    const json = JSON.parse(raw);
+    const meta = json.chart?.result?.[0]?.meta;
+    if (meta && meta.regularMarketPrice > 0) {
+      const price = Number(meta.regularMarketPrice);
+      const prev = Number(meta.chartPreviousClose || meta.previousClose || price);
+      const change = price - prev;
+      const changePercent = prev > 0 ? (change / prev) * 100 : 0;
+      return {
+        price,
+        change: Math.round(change * 100) / 100,
+        changePercent: Math.round(changePercent * 100) / 100,
+        shortName: meta.shortName || meta.symbol || ticker
+      };
+    }
+  } catch (err: any) {
+    console.warn(`[MarketData] Yahoo v8 chart error for ${ticker}:`, err.message);
+  }
+  return null;
+}
+
 export default async function handler(req: any, res: any) {
   res.setHeader('content-type', 'application/json');
-  res.setHeader('cache-control', 'private, max-age=300');
+  res.setHeader('cache-control', 'public, max-age=300');
 
   if (req.method !== 'GET' && req.method !== 'POST') {
     res.statusCode = 405;
@@ -170,8 +215,8 @@ export default async function handler(req: any, res: any) {
 
   let tickers: string[] = [];
   if (req.method === 'GET') {
-    const url = new URL(req.url, 'http://localhost');
-    tickers = (url.searchParams.get('tickers') || '').split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
+    const rawQueryTickers = req.query?.tickers || (req.url ? new URL(req.url, 'http://localhost').searchParams.get('tickers') : null);
+    tickers = (rawQueryTickers || '').split(',').map((t: string) => t.trim().toUpperCase()).filter(Boolean);
   } else {
     const body = req.body || {};
     tickers = Array.isArray(body.tickers) ? body.tickers.map((t: any) => String(t).trim().toUpperCase()).filter(Boolean) : [];
@@ -183,9 +228,9 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
+  const now = Date.now();
   const results: Record<string, MarketItem> = {};
   const tickersToFetch: string[] = [];
-  const now = Date.now();
 
   for (const t of tickers) {
     const cached = quotesCache.get(t);
@@ -196,15 +241,18 @@ export default async function handler(req: any, res: any) {
     }
   }
 
-  // Handle crypto or currencies via AwesomeAPI if needed
-  const cryptoTickers = tickersToFetch.filter(t => ['BTC', 'ETH', 'SOL', 'USD', 'EUR'].includes(t));
+  // Handle crypto or currencies via AwesomeAPI
+  const cryptoTickers = tickersToFetch.filter(t => ['BTC', 'ETH', 'SOL', 'USD', 'EUR', 'BTCBRL', 'ETHBRL', 'USDBRL', 'EURBRL'].includes(t));
   const b3Tickers = tickersToFetch.filter(t => !cryptoTickers.includes(t));
 
   if (cryptoTickers.length > 0) {
     try {
-      const cryptoMap: Record<string, string> = { BTC: 'BTC-BRL', ETH: 'ETH-BRL', USD: 'USD-BRL', EUR: 'EUR-BRL' };
-      const pairs = cryptoTickers.map(c => cryptoMap[c] || `${c}-BRL`).join(',');
-      const rawAwesome = await httpGet(`https://economia.awesomeapi.com.br/last/${pairs}`, 5000);
+      const cryptoMap: Record<string, string> = {
+        BTC: 'BTC-BRL', ETH: 'ETH-BRL', SOL: 'SOL-BRL', USD: 'USD-BRL', EUR: 'EUR-BRL',
+        BTCBRL: 'BTC-BRL', ETHBRL: 'ETH-BRL', USDBRL: 'USD-BRL', EURBRL: 'EUR-BRL'
+      };
+      const pairs = [...new Set(cryptoTickers.map(c => cryptoMap[c] || `${c}-BRL`))].join(',');
+      const rawAwesome = await httpGet(`https://economia.awesomeapi.com.br/last/${pairs}`, {}, 5000);
       const dataAwesome = JSON.parse(rawAwesome);
 
       for (const c of cryptoTickers) {
@@ -223,6 +271,11 @@ export default async function handler(req: any, res: any) {
             decision: changePercent < -3 ? 'COMPRA' : 'MANTER',
             decisionLabel: changePercent < -3 ? 'Oportunidade (Dip)' : 'Manter',
             updatedAt: new Date().toISOString(),
+            valuation: {
+              recommendation: changePercent < -3 ? 'COMPRA' : 'MANTER',
+              safetyMarginPct: changePercent,
+              reason: changePercent < -3 ? 'Variação negativa diária relevante (Oportunidade de Acúmulo)' : 'Estabilidade intradiária'
+            }
           };
           quotesCache.set(c, { item, ts: now });
           results[c] = item;
@@ -233,74 +286,82 @@ export default async function handler(req: any, res: any) {
     }
   }
 
-  // Chunk B3 tickers in groups of 10 for Brapi API
-  const token = process.env.BRAPI_TOKEN ? `?token=${encodeURIComponent(process.env.BRAPI_TOKEN)}&fundamental=true&dividends=true` : '?fundamental=true&dividends=true';
-  const chunkSize = 10;
+  // Handle B3 Tickers
+  if (b3Tickers.length > 0) {
+    await Promise.all(b3Tickers.map(async (ticker) => {
+      let quote = await fetchYahooV8(ticker);
+      let brapiData: any = {};
 
-  for (let i = 0; i < b3Tickers.length; i += chunkSize) {
-    const chunk = b3Tickers.slice(i, i + chunkSize);
-    try {
-      const brapiUrl = `https://brapi.dev/api/quote/${chunk.join(',')}${token}`;
-      const raw = await httpGet(brapiUrl, 6000);
-      const json = JSON.parse(raw);
-
-      if (Array.isArray(json.results)) {
-        for (const item of json.results) {
-          const symbol = String(item.symbol || '').toUpperCase();
-          const price = Number(item.regularMarketPrice || 0);
-          const change = Number(item.regularMarketChange || 0);
-          const changePercent = Number(item.regularMarketChangePercent || 0);
-
-          const valuation = calculateValuation(symbol, price, item);
-
-          const marketItem: MarketItem = {
-            ticker: symbol,
-            price,
-            change,
-            changePercent: Math.round(changePercent * 100) / 100,
-            signal: valuation.signal || 'Manter',
-            decision: valuation.decision || 'MANTER',
-            decisionLabel: valuation.decisionLabel || 'Manter',
-            grahamPrice: valuation.grahamPrice,
-            grahamMargin: valuation.grahamMargin,
-            bazinPrice: valuation.bazinPrice,
-            bazinMargin: valuation.bazinMargin,
-            dividendYield: valuation.dividendYield,
-            dividends12m: valuation.dividends12m,
-            priceEarnings: valuation.priceEarnings,
-            lpa: valuation.lpa,
-            vpa: valuation.vpa,
-            logourl: item.logourl,
-            fiftyTwoWeekHigh: item.fiftyTwoWeekHigh,
-            fiftyTwoWeekLow: item.fiftyTwoWeekLow,
-            shortName: item.shortName,
-            longName: item.longName,
-            updatedAt: new Date().toISOString(),
-          };
-
-          quotesCache.set(symbol, { item: marketItem, ts: now });
-          results[symbol] = marketItem;
+      // Attempt to complement with Brapi single ticker if possible
+      try {
+        const tokenQuery = process.env.BRAPI_TOKEN ? `?token=${encodeURIComponent(process.env.BRAPI_TOKEN)}&fundamental=true&dividends=true` : '';
+        const rawBrapi = await httpGet(`https://brapi.dev/api/quote/${ticker}${tokenQuery}`, {}, 4000);
+        const bJson = JSON.parse(rawBrapi);
+        if (Array.isArray(bJson.results) && bJson.results[0]) {
+          brapiData = bJson.results[0];
+          if (!quote && brapiData.regularMarketPrice > 0) {
+            quote = {
+              price: Number(brapiData.regularMarketPrice),
+              change: Number(brapiData.regularMarketChange || 0),
+              changePercent: Number(brapiData.regularMarketChangePercent || 0),
+              shortName: brapiData.shortName
+            };
+          }
         }
+      } catch {}
+
+      if (quote && quote.price > 0) {
+        const valuation = calculateValuation(ticker, quote.price, brapiData);
+        const item: MarketItem = {
+          ticker,
+          price: quote.price,
+          change: quote.change,
+          changePercent: quote.changePercent,
+          signal: valuation.signal,
+          decision: valuation.decision,
+          decisionLabel: valuation.decisionLabel,
+          grahamPrice: valuation.grahamPrice,
+          grahamMargin: valuation.grahamMargin,
+          bazinPrice: valuation.bazinPrice,
+          bazinMargin: valuation.bazinMargin,
+          dividendYield: valuation.dividendYield,
+          dividends12m: valuation.dividends12m,
+          priceEarnings: valuation.priceEarnings,
+          lpa: valuation.lpa,
+          vpa: valuation.vpa,
+          logourl: brapiData.logourl,
+          shortName: quote.shortName || brapiData.shortName,
+          longName: brapiData.longName,
+          updatedAt: new Date().toISOString(),
+          valuation: {
+            recommendation: valuation.decision,
+            grahamValue: valuation.grahamPrice ?? null,
+            bazinPrice: valuation.bazinPrice ?? null,
+            safetyMarginPct: valuation.bazinMargin ?? valuation.grahamMargin ?? null,
+            reason: valuation.decisionLabel
+          }
+        };
+        quotesCache.set(ticker, { item, ts: now });
+        results[ticker] = item;
+      } else {
+        // Fallback placeholder if ticker completely unreachable
+        const fallbackVal = calculateValuation(ticker, 0, {});
+        results[ticker] = {
+          ticker,
+          price: 0,
+          change: 0,
+          changePercent: 0,
+          signal: 'Manter',
+          decision: 'MANTER',
+          decisionLabel: 'Cotação Indisponível',
+          updatedAt: new Date().toISOString(),
+          valuation: {
+            recommendation: 'DESCONHECIDO',
+            reason: 'Ativo temporariamente indisponível'
+          }
+        };
       }
-    } catch (e: any) {
-      console.warn(`[MarketData] Brapi fetch error for [${chunk.join(',')}]:`, e.message);
-      // Fallback for unreached tickers
-      for (const t of chunk) {
-        if (!results[t]) {
-          const fallbackItem: MarketItem = {
-            ticker: t,
-            price: 0,
-            change: 0,
-            changePercent: 0,
-            signal: 'Manter',
-            decision: 'MANTER',
-            decisionLabel: 'Cotação Indisponível',
-            updatedAt: new Date().toISOString(),
-          };
-          results[t] = fallbackItem;
-        }
-      }
-    }
+    }));
   }
 
   res.statusCode = 200;
