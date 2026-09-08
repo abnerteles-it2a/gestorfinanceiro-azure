@@ -26,9 +26,16 @@ export interface MarketInfo {
     fiftyTwoWeekLow?: number;
     shortName?: string;
     longName?: string;
+    assetClass?: 'STOCK' | 'FII' | 'CRYPTO' | 'CURRENCY' | 'OTHER';
+    fiiCeilingPrice?: number;
+    fiiMargin?: number;
+    pvp?: number;
+    drawdownFromAthPct?: number;
     valuation?: {
         grahamValue?: number | null;
         bazinPrice?: number | null;
+        fiiCeilingPrice?: number | null;
+        pvp?: number | null;
         safetyMarginPct?: number | null;
         recommendation?: 'COMPRA_FORTE' | 'COMPRA' | 'MANTER' | 'AGUARDAR' | 'DESCONHECIDO';
         reason?: string;
@@ -279,6 +286,11 @@ export const getMarketData = async (tickers: string[], force: boolean = false): 
                             fiftyTwoWeekLow: item.fiftyTwoWeekLow,
                             shortName: item.shortName,
                             longName: item.longName,
+                            assetClass: item.assetClass,
+                            fiiCeilingPrice: item.fiiCeilingPrice,
+                            fiiMargin: item.fiiMargin,
+                            pvp: item.pvp,
+                            drawdownFromAthPct: item.drawdownFromAthPct,
                             valuation: item.valuation
                         };
                         resultData[t] = info;
@@ -1781,7 +1793,11 @@ export const simulateInvestmentPurchase = async (simulation: {
     price?: number;
     bazinPrice?: number;
     grahamPrice?: number;
+    fiiCeilingPrice?: number;
+    pvp?: number;
+    drawdownFromAthPct?: number;
     dividendYield?: number;
+    assetClass?: string;
 }, context: {
     totalInvested: number;
     assets: any[];

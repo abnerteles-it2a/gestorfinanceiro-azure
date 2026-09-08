@@ -1,24 +1,39 @@
 import https from 'https';
 import http from 'http';
 
+export type AssetClass = 'STOCK' | 'FII' | 'CRYPTO' | 'CURRENCY' | 'OTHER';
+
 export interface MarketItem {
   ticker: string;
   price: number;
   change: number;
   changePercent: number;
+  assetClass: AssetClass;
   signal: 'Comprar' | 'Vender' | 'Manter';
   decision: 'COMPRA_FORTE' | 'COMPRA' | 'MANTER' | 'AGUARDAR';
   decisionLabel: string;
-  grahamPrice?: number;
-  grahamMargin?: number;
-  bazinPrice?: number;
-  bazinMargin?: number;
-  dividendYield?: number;
-  dividends12m?: number;
-  priceEarnings?: number; // P/L
-  priceToBook?: number;   // P/VP
-  lpa?: number;
-  vpa?: number;
+  
+  // Equity specific (Ações)
+  grahamPrice?: number | null;
+  grahamMargin?: number | null;
+  bazinPrice?: number | null;
+  bazinMargin?: number | null;
+
+  // Real Estate specific (FIIs)
+  fiiCeilingPrice?: number | null;
+  fiiMargin?: number | null;
+  pvp?: number | null;
+
+  // Crypto specific
+  drawdownFromAthPct?: number | null;
+  maxRecommendedWeightPct?: number;
+
+  // Shared fundamental metrics
+  dividendYield?: number | null;
+  dividends12m?: number | null;
+  priceEarnings?: number | null; // P/L
+  lpa?: number | null;
+  vpa?: number | null;
   logourl?: string;
   fiftyTwoWeekHigh?: number;
   fiftyTwoWeekLow?: number;
@@ -29,6 +44,8 @@ export interface MarketItem {
     recommendation: 'COMPRA_FORTE' | 'COMPRA' | 'MANTER' | 'AGUARDAR' | 'DESCONHECIDO';
     grahamValue?: number | null;
     bazinPrice?: number | null;
+    fiiCeilingPrice?: number | null;
+    pvp?: number | null;
     safetyMarginPct?: number | null;
     reason: string;
   };
@@ -62,23 +79,150 @@ function httpGet(url: string, headers: Record<string, string> = {}, timeoutMs = 
   });
 }
 
-function calculateValuation(ticker: string, price: number, rawData: any = {}): {
-  signal: 'Comprar' | 'Vender' | 'Manter';
-  decision: 'COMPRA_FORTE' | 'COMPRA' | 'MANTER' | 'AGUARDAR';
-  decisionLabel: string;
-  grahamPrice?: number;
-  grahamMargin?: number;
-  bazinPrice?: number;
-  bazinMargin?: number;
-  dividendYield?: number;
-  dividends12m?: number;
-  priceEarnings?: number;
-  lpa?: number;
-  vpa?: number;
-} {
-  const isFii = ticker.endsWith('11') && !['BOVA11', 'SMAL11', 'IVVB11', 'HASH11'].includes(ticker);
-  
-  // Dividends in last 12m
+export function detectAssetClass(ticker: string): AssetClass {
+  const t = ticker.toUpperCase().trim();
+  if (['BTC', 'ETH', 'SOL', 'BTCBRL', 'ETHBRL', 'SOLBRL', 'XRP', 'ADA', 'BNB'].includes(t) || /(BTC|ETH|SOL|USDT|USDC)/i.test(t)) {
+    return 'CRYPTO';
+  }
+  if (['USD', 'EUR', 'USDBRL', 'EURBRL'].includes(t)) {
+    return 'CURRENCY';
+  }
+  const broadEtfs = ['BOVA11', 'SMAL11', 'IVVB11', 'HASH11', 'XINA11', 'GOLD11', 'DIVO11', 'BBSD11', 'SPXI11', 'BRAX11'];
+  if (t.endsWith('11') && !broadEtfs.includes(t)) {
+    return 'FII';
+  }
+  return 'STOCK';
+}
+
+function calculateSpecializedValuation(
+  ticker: string,
+  price: number,
+  assetClass: AssetClass,
+  rawData: any = {},
+  high52w?: number
+): Partial<MarketItem> {
+  // ─── 1. CRIPTOMOEDAS ────────────────────────────────────────────────────────
+  if (assetClass === 'CRYPTO') {
+    const changePercent = Number(rawData.changePercent || 0);
+    const drawdown = high52w && high52w > 0 && price > 0 ? Math.round(((price - high52w) / high52w) * 1000) / 10 : null;
+
+    let decision: 'COMPRA_FORTE' | 'COMPRA' | 'MANTER' | 'AGUARDAR' = 'MANTER';
+    let decisionLabel = 'Fase de Acúmulo Gradual (DCA)';
+
+    if (changePercent <= -7 || (drawdown !== null && drawdown <= -40)) {
+      decision = 'COMPRA_FORTE';
+      decisionLabel = 'Oportunidade de Acúmulo Relevante (Correção Forte)';
+    } else if (changePercent <= -3 || (drawdown !== null && drawdown <= -20)) {
+      decision = 'COMPRA';
+      decisionLabel = 'Aporte Pontual em Correção (Dip)';
+    } else if (changePercent >= 8 || (drawdown !== null && drawdown >= -3)) {
+      decision = 'AGUARDAR';
+      decisionLabel = 'Aguardar Arrefecimento / Zona de Euforia';
+    }
+
+    const signal: 'Comprar' | 'Vender' | 'Manter' = decision === 'COMPRA_FORTE' || decision === 'COMPRA' ? 'Comprar' : decision === 'AGUARDAR' ? 'Vender' : 'Manter';
+
+    return {
+      assetClass: 'CRYPTO',
+      signal,
+      decision,
+      decisionLabel,
+      drawdownFromAthPct: drawdown,
+      maxRecommendedWeightPct: 5,
+      grahamPrice: null,
+      grahamMargin: null,
+      bazinPrice: null,
+      bazinMargin: null,
+      fiiCeilingPrice: null,
+      fiiMargin: null,
+      pvp: null,
+      dividendYield: null,
+      dividends12m: null,
+    };
+  }
+
+  // ─── 2. FUNDOS IMOBILIÁRIOS (FIIs) ──────────────────────────────────────────
+  if (assetClass === 'FII') {
+    // Dividends in last 12m
+    let dividends12m = 0;
+    if (Array.isArray(rawData.dividendsData?.cashDividends)) {
+      const oneYearAgo = new Date();
+      oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+      dividends12m = rawData.dividendsData.cashDividends
+        .filter((d: any) => new Date(d.paymentDate || d.approvedOn || Date.now()) >= oneYearAgo)
+        .reduce((acc: number, d: any) => acc + Number(d.rate || 0), 0);
+    }
+    if (!dividends12m && typeof rawData.dividends12m === 'number') {
+      dividends12m = rawData.dividends12m;
+    }
+    // FII benchmark estimate if dividends not delivered (~10% a.a.)
+    if (!dividends12m && price > 0) {
+      dividends12m = price * 0.10;
+    }
+
+    const dividendYield = price > 0 && dividends12m > 0 ? (dividends12m / price) * 100 : 0;
+
+    // FII Ceiling Price (Spread sobre NTN-B: Taxa de retorno requerida = 8.75% a.a.)
+    // Fórmula de Teto de FII: Dividendo_12m / 0.0875
+    let fiiCeilingPrice: number | null = null;
+    let fiiMargin: number | null = null;
+    if (dividends12m > 0) {
+      fiiCeilingPrice = Math.round((dividends12m / 0.0875) * 100) / 100;
+      fiiMargin = price > 0 ? Math.round(((fiiCeilingPrice - price) / price) * 1000) / 10 : null;
+    }
+
+    // P/VP (Preço / Valor Patrimonial)
+    const vpa = Number(rawData.bookValuePerShare || rawData.vpa || 0);
+    let pvp: number | null = null;
+    if (vpa > 0 && price > 0) {
+      pvp = Math.round((price / vpa) * 100) / 100;
+    } else if (typeof rawData.priceToBook === 'number' && rawData.priceToBook > 0) {
+      pvp = Math.round(rawData.priceToBook * 100) / 100;
+    } else if (price > 0) {
+      // Benchmark padrão se não constar laudo patrimonial
+      pvp = 0.98;
+    }
+
+    let decision: 'COMPRA_FORTE' | 'COMPRA' | 'MANTER' | 'AGUARDAR' = 'MANTER';
+    let decisionLabel = 'Preço Justo Patrimonial';
+
+    if (pvp !== null && pvp <= 0.95 && dividendYield >= 9.0) {
+      decision = 'COMPRA_FORTE';
+      decisionLabel = 'Desconto Patrimonial (P/VP < 0.95) & Alto Yield';
+    } else if (pvp !== null && pvp <= 1.02 && fiiMargin !== null && fiiMargin >= 0) {
+      decision = 'COMPRA';
+      decisionLabel = 'Preço Atrativo (Abaixo do Teto FII)';
+    } else if (pvp !== null && pvp <= 1.06) {
+      decision = 'MANTER';
+      decisionLabel = 'Preço Justo / Faixa de Equilíbrio';
+    } else {
+      decision = 'AGUARDAR';
+      decisionLabel = 'Ágio Patrimonial Excessivo (P/VP > 1.06)';
+    }
+
+    const signal: 'Comprar' | 'Vender' | 'Manter' = decision === 'COMPRA_FORTE' || decision === 'COMPRA' ? 'Comprar' : decision === 'AGUARDAR' ? 'Vender' : 'Manter';
+
+    return {
+      assetClass: 'FII',
+      signal,
+      decision,
+      decisionLabel,
+      fiiCeilingPrice,
+      fiiMargin,
+      pvp,
+      dividendYield: Math.round(dividendYield * 100) / 100,
+      dividends12m: Math.round(dividends12m * 100) / 100,
+      vpa: vpa || null,
+      // Strictly disable Graham and Stock Bazin for FIIs
+      grahamPrice: null,
+      grahamMargin: null,
+      bazinPrice: null,
+      bazinMargin: null,
+      drawdownFromAthPct: null,
+    };
+  }
+
+  // ─── 3. AÇÕES (EQUITIES) ────────────────────────────────────────────────────
   let dividends12m = 0;
   if (Array.isArray(rawData.dividendsData?.cashDividends)) {
     const oneYearAgo = new Date();
@@ -90,78 +234,52 @@ function calculateValuation(ticker: string, price: number, rawData: any = {}): {
   if (!dividends12m && typeof rawData.dividends12m === 'number') {
     dividends12m = rawData.dividends12m;
   }
-  // Standard benchmark estimate if dividends not delivered by quote endpoint
-  if (!dividends12m && price > 0) {
-    if (isFii) {
-      // Average Brazilian FII DY benchmark ~10.5% a.a.
-      dividends12m = price * 0.105;
-    }
-  }
 
   const dividendYield = price > 0 && dividends12m > 0 ? (dividends12m / price) * 100 : 0;
-  
-  // Bazin Ceiling Price (DY minimum 6% per year: Dividends / 0.06)
-  let bazinPrice: number | undefined;
-  let bazinMargin: number | undefined;
+
+  // Bazin clássico para ações (6% ao ano)
+  let bazinPrice: number | null = null;
+  let bazinMargin: number | null = null;
   if (dividends12m > 0) {
     bazinPrice = Math.round((dividends12m / 0.06) * 100) / 100;
-    bazinMargin = price > 0 ? Math.round(((bazinPrice - price) / price) * 1000) / 10 : undefined;
+    bazinMargin = price > 0 ? Math.round(((bazinPrice - price) / price) * 1000) / 10 : null;
   }
 
-  // Graham Fair Price: V = sqrt(22.5 * LPA * VPA)
-  let grahamPrice: number | undefined;
-  let grahamMargin: number | undefined;
+  // Graham para ações: V = sqrt(22.5 * LPA * VPA)
+  let grahamPrice: number | null = null;
+  let grahamMargin: number | null = null;
   const lpa = Number(rawData.earningsPerShare || rawData.lpa || 0);
   const vpa = Number(rawData.bookValuePerShare || rawData.vpa || 0);
 
-  if (lpa > 0 && vpa > 0 && !isFii) {
+  if (lpa > 0 && vpa > 0) {
     const rawGraham = Math.sqrt(22.5 * lpa * vpa);
     if (!isNaN(rawGraham) && isFinite(rawGraham)) {
       grahamPrice = Math.round(rawGraham * 100) / 100;
-      grahamMargin = price > 0 ? Math.round(((grahamPrice - price) / price) * 1000) / 10 : undefined;
+      grahamMargin = price > 0 ? Math.round(((grahamPrice - price) / price) * 1000) / 10 : null;
     }
   }
 
-  // Determine Thermometer Decision
   let decision: 'COMPRA_FORTE' | 'COMPRA' | 'MANTER' | 'AGUARDAR' = 'MANTER';
-  let decisionLabel = 'Neutro / Manter';
+  let decisionLabel = 'Preço Equilibrado';
 
-  if (isFii) {
-    if (bazinMargin !== undefined && bazinMargin >= 15) {
-      decision = 'COMPRA_FORTE';
-      decisionLabel = 'Compra Forte (Alto Yield)';
-    } else if (bazinMargin !== undefined && bazinMargin >= 0) {
-      decision = 'COMPRA';
-      decisionLabel = 'Preço Atrativo';
-    } else if (bazinMargin !== undefined && bazinMargin >= -10) {
-      decision = 'MANTER';
-      decisionLabel = 'Preço Justo';
-    } else {
-      decision = 'AGUARDAR';
-      decisionLabel = 'Acima do Teto';
-    }
-  } else {
-    // Stocks
-    if ((grahamMargin !== undefined && grahamMargin >= 25) || (bazinMargin !== undefined && bazinMargin >= 15 && (grahamMargin ?? 0) >= 0)) {
-      decision = 'COMPRA_FORTE';
-      decisionLabel = 'Compra Forte (Grande Desconto)';
-    } else if ((grahamMargin !== undefined && grahamMargin >= 5) || (bazinMargin !== undefined && bazinMargin >= 5)) {
-      decision = 'COMPRA';
-      decisionLabel = 'Oportunidade de Compra';
-    } else if ((grahamMargin !== undefined && grahamMargin >= -15) || (bazinMargin !== undefined && bazinMargin >= -10)) {
-      decision = 'MANTER';
-      decisionLabel = 'Preço Equilibrado';
-    } else if (grahamMargin !== undefined && grahamMargin < -15) {
-      decision = 'AGUARDAR';
-      decisionLabel = 'Aguardar Correção';
-    }
+  if ((grahamMargin !== null && grahamMargin >= 25) || (bazinMargin !== null && bazinMargin >= 15 && (grahamMargin ?? 0) >= 0)) {
+    decision = 'COMPRA_FORTE';
+    decisionLabel = 'Compra Forte (Desconto Graham / Bazin)';
+  } else if ((grahamMargin !== null && grahamMargin >= 5) || (bazinMargin !== null && bazinMargin >= 5)) {
+    decision = 'COMPRA';
+    decisionLabel = 'Oportunidade de Compra (Margem de Segurança)';
+  } else if ((grahamMargin !== null && grahamMargin >= -15) || (bazinMargin !== null && bazinMargin >= -10)) {
+    decision = 'MANTER';
+    decisionLabel = 'Preço Equilibrado / Manter Posição';
+  } else if (grahamMargin !== null && grahamMargin < -15) {
+    decision = 'AGUARDAR';
+    decisionLabel = 'Aguardar Correção (Acima do Justo)';
   }
 
-  const signal: 'Comprar' | 'Vender' | 'Manter' = 
-    decision === 'COMPRA_FORTE' || decision === 'COMPRA' ? 'Comprar' :
-    decision === 'AGUARDAR' ? 'Vender' : 'Manter';
+  const signal: 'Comprar' | 'Vender' | 'Manter' = decision === 'COMPRA_FORTE' || decision === 'COMPRA' ? 'Comprar' : decision === 'AGUARDAR' ? 'Vender' : 'Manter';
 
   return {
+    assetClass: 'STOCK',
     signal,
     decision,
     decisionLabel,
@@ -169,16 +287,20 @@ function calculateValuation(ticker: string, price: number, rawData: any = {}): {
     grahamMargin,
     bazinPrice,
     bazinMargin,
+    fiiCeilingPrice: null,
+    fiiMargin: null,
+    pvp: vpa > 0 ? Math.round((price / vpa) * 100) / 100 : null,
     dividendYield: Math.round(dividendYield * 100) / 100,
     dividends12m: Math.round(dividends12m * 100) / 100,
-    lpa: lpa || undefined,
-    vpa: vpa || undefined,
-    priceEarnings: Number(rawData.priceEarnings || 0) || undefined,
+    lpa: lpa || null,
+    vpa: vpa || null,
+    priceEarnings: Number(rawData.priceEarnings || 0) || null,
+    drawdownFromAthPct: null,
   };
 }
 
-// Fetch single ticker from Yahoo v8 Chart API (Resilient, 100% Free, B3 Stocks & FIIs)
-async function fetchYahooV8(ticker: string): Promise<{ price: number; change: number; changePercent: number; shortName?: string } | null> {
+// Fetch single ticker from Yahoo v8 Chart API
+async function fetchYahooV8(ticker: string): Promise<{ price: number; change: number; changePercent: number; shortName?: string; high52w?: number } | null> {
   try {
     const sym = ticker.toUpperCase().endsWith('.SA') ? ticker.toUpperCase() : `${ticker.toUpperCase()}.SA`;
     const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1d`;
@@ -194,7 +316,8 @@ async function fetchYahooV8(ticker: string): Promise<{ price: number; change: nu
         price,
         change: Math.round(change * 100) / 100,
         changePercent: Math.round(changePercent * 100) / 100,
-        shortName: meta.shortName || meta.symbol || ticker
+        shortName: meta.shortName || meta.symbol || ticker,
+        high52w: meta.fiftyTwoWeekHigh || undefined,
       };
     }
   } catch (err: any) {
@@ -242,7 +365,7 @@ export default async function handler(req: any, res: any) {
   }
 
   // Handle crypto or currencies via AwesomeAPI
-  const cryptoTickers = tickersToFetch.filter(t => ['BTC', 'ETH', 'SOL', 'USD', 'EUR', 'BTCBRL', 'ETHBRL', 'USDBRL', 'EURBRL'].includes(t));
+  const cryptoTickers = tickersToFetch.filter(t => detectAssetClass(t) === 'CRYPTO' || detectAssetClass(t) === 'CURRENCY');
   const b3Tickers = tickersToFetch.filter(t => !cryptoTickers.includes(t));
 
   if (cryptoTickers.length > 0) {
@@ -262,19 +385,35 @@ export default async function handler(req: any, res: any) {
           const price = Number(d.bid || d.ask || 0);
           const changePercent = Number(d.pctChange || 0);
           const change = Number(d.varBid || 0);
+          const high = Number(d.high || price);
+          const aClass = detectAssetClass(c);
+          const val = calculateSpecializedValuation(c, price, aClass, { changePercent }, high);
+
           const item: MarketItem = {
             ticker: c,
             price,
             change,
             changePercent,
-            signal: changePercent < -3 ? 'Comprar' : 'Manter',
-            decision: changePercent < -3 ? 'COMPRA' : 'MANTER',
-            decisionLabel: changePercent < -3 ? 'Oportunidade (Dip)' : 'Manter',
+            assetClass: aClass,
+            signal: val.signal || 'Manter',
+            decision: val.decision || 'MANTER',
+            decisionLabel: val.decisionLabel || 'Fase de Acúmulo',
+            drawdownFromAthPct: val.drawdownFromAthPct,
+            maxRecommendedWeightPct: val.maxRecommendedWeightPct || 5,
+            grahamPrice: null,
+            grahamMargin: null,
+            bazinPrice: null,
+            bazinMargin: null,
+            fiiCeilingPrice: null,
+            fiiMargin: null,
+            pvp: null,
+            dividendYield: null,
+            dividends12m: null,
             updatedAt: new Date().toISOString(),
             valuation: {
-              recommendation: changePercent < -3 ? 'COMPRA' : 'MANTER',
-              safetyMarginPct: changePercent,
-              reason: changePercent < -3 ? 'Variação negativa diária relevante (Oportunidade de Acúmulo)' : 'Estabilidade intradiária'
+              recommendation: val.decision || 'MANTER',
+              safetyMarginPct: val.drawdownFromAthPct,
+              reason: val.decisionLabel || 'Ativo de alta volatilidade. Exposição máxima sugerida: 2% a 5% da carteira.'
             }
           };
           quotesCache.set(c, { item, ts: now });
@@ -289,10 +428,10 @@ export default async function handler(req: any, res: any) {
   // Handle B3 Tickers
   if (b3Tickers.length > 0) {
     await Promise.all(b3Tickers.map(async (ticker) => {
+      const aClass = detectAssetClass(ticker);
       let quote = await fetchYahooV8(ticker);
       let brapiData: any = {};
 
-      // Attempt to complement with Brapi single ticker if possible
       try {
         const tokenQuery = process.env.BRAPI_TOKEN ? `?token=${encodeURIComponent(process.env.BRAPI_TOKEN)}&fundamental=true&dividends=true` : '';
         const rawBrapi = await httpGet(`https://brapi.dev/api/quote/${ticker}${tokenQuery}`, {}, 4000);
@@ -304,53 +443,60 @@ export default async function handler(req: any, res: any) {
               price: Number(brapiData.regularMarketPrice),
               change: Number(brapiData.regularMarketChange || 0),
               changePercent: Number(brapiData.regularMarketChangePercent || 0),
-              shortName: brapiData.shortName
+              shortName: brapiData.shortName,
+              high52w: brapiData.fiftyTwoWeekHigh
             };
           }
         }
       } catch {}
 
       if (quote && quote.price > 0) {
-        const valuation = calculateValuation(ticker, quote.price, brapiData);
+        const val = calculateSpecializedValuation(ticker, quote.price, aClass, brapiData, quote.high52w);
         const item: MarketItem = {
           ticker,
           price: quote.price,
           change: quote.change,
           changePercent: quote.changePercent,
-          signal: valuation.signal,
-          decision: valuation.decision,
-          decisionLabel: valuation.decisionLabel,
-          grahamPrice: valuation.grahamPrice,
-          grahamMargin: valuation.grahamMargin,
-          bazinPrice: valuation.bazinPrice,
-          bazinMargin: valuation.bazinMargin,
-          dividendYield: valuation.dividendYield,
-          dividends12m: valuation.dividends12m,
-          priceEarnings: valuation.priceEarnings,
-          lpa: valuation.lpa,
-          vpa: valuation.vpa,
+          assetClass: aClass,
+          signal: val.signal || 'Manter',
+          decision: val.decision || 'MANTER',
+          decisionLabel: val.decisionLabel || 'Preço Equilibrado',
+          grahamPrice: val.grahamPrice,
+          grahamMargin: val.grahamMargin,
+          bazinPrice: val.bazinPrice,
+          bazinMargin: val.bazinMargin,
+          fiiCeilingPrice: val.fiiCeilingPrice,
+          fiiMargin: val.fiiMargin,
+          pvp: val.pvp,
+          dividendYield: val.dividendYield,
+          dividends12m: val.dividends12m,
+          priceEarnings: val.priceEarnings,
+          lpa: val.lpa,
+          vpa: val.vpa,
+          drawdownFromAthPct: val.drawdownFromAthPct,
           logourl: brapiData.logourl,
           shortName: quote.shortName || brapiData.shortName,
           longName: brapiData.longName,
           updatedAt: new Date().toISOString(),
           valuation: {
-            recommendation: valuation.decision,
-            grahamValue: valuation.grahamPrice ?? null,
-            bazinPrice: valuation.bazinPrice ?? null,
-            safetyMarginPct: valuation.bazinMargin ?? valuation.grahamMargin ?? null,
-            reason: valuation.decisionLabel
+            recommendation: val.decision || 'MANTER',
+            grahamValue: val.grahamPrice ?? null,
+            bazinPrice: val.bazinPrice ?? null,
+            fiiCeilingPrice: val.fiiCeilingPrice ?? null,
+            pvp: val.pvp ?? null,
+            safetyMarginPct: aClass === 'FII' ? (val.fiiMargin ?? null) : (val.bazinMargin ?? val.grahamMargin ?? null),
+            reason: val.decisionLabel || 'Preço Equilibrado'
           }
         };
         quotesCache.set(ticker, { item, ts: now });
         results[ticker] = item;
       } else {
-        // Fallback placeholder if ticker completely unreachable
-        const fallbackVal = calculateValuation(ticker, 0, {});
         results[ticker] = {
           ticker,
           price: 0,
           change: 0,
           changePercent: 0,
+          assetClass: aClass,
           signal: 'Manter',
           decision: 'MANTER',
           decisionLabel: 'Cotação Indisponível',

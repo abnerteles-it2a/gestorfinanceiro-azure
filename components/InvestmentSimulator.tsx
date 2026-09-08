@@ -65,8 +65,12 @@ export const InvestmentSimulator: React.FC = () => {
                 ticker: ticker.trim().toUpperCase(),
                 amount,
                 price,
+                assetClass: activeQuote?.assetClass,
                 bazinPrice: activeQuote?.bazinPrice,
                 grahamPrice: activeQuote?.grahamPrice,
+                fiiCeilingPrice: activeQuote?.fiiCeilingPrice,
+                pvp: activeQuote?.pvp,
+                drawdownFromAthPct: activeQuote?.drawdownFromAthPct,
                 dividendYield: activeQuote?.dividendYield
             }, {
                 totalInvested: Number(totalInvested || portfolioValue || 0),
@@ -211,29 +215,98 @@ export const InvestmentSimulator: React.FC = () => {
                             </div>
 
                             <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-200 dark:border-slate-700/60 text-xs">
-                                <div>
-                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Teto Bazin (DY 6%)</span>
-                                    <span className="font-bold text-slate-900 dark:text-white">
-                                        {activeQuote.bazinPrice ? formatCurrency(activeQuote.bazinPrice) : 'n/d'}
-                                    </span>
-                                    {activeQuote.bazinMargin !== undefined && (
-                                        <span className={`text-[9px] ml-1 font-bold ${activeQuote.bazinMargin >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                                            ({activeQuote.bazinMargin >= 0 ? `+${activeQuote.bazinMargin}%` : `${activeQuote.bazinMargin}%`})
-                                        </span>
-                                    )}
-                                </div>
+                                {activeQuote.assetClass === 'FII' ? (
+                                    <>
+                                        <div>
+                                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">P/VP Patrimonial</span>
+                                            <div className="flex items-center gap-1.5 mt-0.5">
+                                                <span className="font-bold text-slate-900 dark:text-white text-sm">
+                                                    {activeQuote.pvp ? activeQuote.pvp.toFixed(2) : 'n/d'}
+                                                </span>
+                                                {activeQuote.pvp && (
+                                                    <span className={`text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded ${
+                                                        activeQuote.pvp < 0.98 
+                                                            ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' 
+                                                            : activeQuote.pvp > 1.05 
+                                                                ? 'bg-rose-500/15 text-rose-700 dark:text-rose-400' 
+                                                                : 'bg-slate-500/15 text-slate-700 dark:text-slate-300'
+                                                    }`}>
+                                                        {activeQuote.pvp < 0.98 ? 'Desconto' : activeQuote.pvp > 1.05 ? 'Ágio' : 'Par'}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
 
-                                <div>
-                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Graham Justo</span>
-                                    <span className="font-bold text-slate-900 dark:text-white">
-                                        {activeQuote.grahamPrice ? formatCurrency(activeQuote.grahamPrice) : 'n/d'}
-                                    </span>
-                                    {activeQuote.grahamMargin !== undefined && (
-                                        <span className={`text-[9px] ml-1 font-bold ${activeQuote.grahamMargin >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                                            ({activeQuote.grahamMargin >= 0 ? `+${activeQuote.grahamMargin}%` : `${activeQuote.grahamMargin}%`})
-                                        </span>
-                                    )}
-                                </div>
+                                        <div>
+                                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Teto FII (Spread 8.75%)</span>
+                                            <span className="font-bold text-slate-900 dark:text-white">
+                                                {activeQuote.fiiCeilingPrice ? formatCurrency(activeQuote.fiiCeilingPrice) : 'n/d'}
+                                            </span>
+                                            {activeQuote.fiiMargin !== undefined && (
+                                                <span className={`text-[9px] ml-1 font-bold ${activeQuote.fiiMargin >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                                    ({activeQuote.fiiMargin >= 0 ? `+${activeQuote.fiiMargin}%` : `${activeQuote.fiiMargin}%`})
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="col-span-2 pt-1 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+                                            <span>DY 12M: <strong className="text-teal-600 dark:text-teal-400">{activeQuote.dividendYield ? (activeQuote.dividendYield * 100).toFixed(2) + '%' : 'n/d'}</strong></span>
+                                            <span className="text-[9px] text-slate-400">FIIs: Graham/Bazin clássicos não se aplicam</span>
+                                        </div>
+                                    </>
+                                ) : activeQuote.assetClass === 'CRYPTO' ? (
+                                    <>
+                                        <div>
+                                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Drawdown Recente</span>
+                                            <span className={`font-bold ${activeQuote.drawdownFromAthPct && activeQuote.drawdownFromAthPct < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'}`}>
+                                                {activeQuote.drawdownFromAthPct !== undefined && activeQuote.drawdownFromAthPct !== null
+                                                    ? `${activeQuote.drawdownFromAthPct > 0 ? '-' : ''}${Math.abs(activeQuote.drawdownFromAthPct).toFixed(1)}%`
+                                                    : 'n/d'}
+                                            </span>
+                                            <span className="text-[9px] block text-slate-400">Distância do topo</span>
+                                        </div>
+
+                                        <div>
+                                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Alocação Segura</span>
+                                            <span className="font-bold text-teal-600 dark:text-teal-400">
+                                                Até 5.0%
+                                            </span>
+                                            <span className="text-[9px] block text-slate-400">Risco assimétrico</span>
+                                        </div>
+                                        <div className="col-span-2 pt-1 border-t border-slate-100 dark:border-slate-800/80 text-[9px] text-slate-400">
+                                            Criptoativo de alta volatilidade. Não possui múltiplos contábeis de dividendos ou Graham.
+                                        </div>
+                                    </>
+                                ) : (
+                                    <>
+                                        <div>
+                                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Teto Bazin (DY 6%)</span>
+                                            <span className="font-bold text-slate-900 dark:text-white">
+                                                {activeQuote.bazinPrice ? formatCurrency(activeQuote.bazinPrice) : 'n/d'}
+                                            </span>
+                                            {activeQuote.bazinMargin !== undefined && (
+                                                <span className={`text-[9px] ml-1 font-bold ${activeQuote.bazinMargin >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                                    ({activeQuote.bazinMargin >= 0 ? `+${activeQuote.bazinMargin}%` : `${activeQuote.bazinMargin}%`})
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        <div>
+                                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Graham Justo</span>
+                                            <span className="font-bold text-slate-900 dark:text-white">
+                                                {activeQuote.grahamPrice ? formatCurrency(activeQuote.grahamPrice) : 'n/d'}
+                                            </span>
+                                            {activeQuote.grahamMargin !== undefined && (
+                                                <span className={`text-[9px] ml-1 font-bold ${activeQuote.grahamMargin >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                                    ({activeQuote.grahamMargin >= 0 ? `+${activeQuote.grahamMargin}%` : `${activeQuote.grahamMargin}%`})
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="col-span-2 pt-1 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+                                            <span>DY 12M: <strong className="text-teal-600 dark:text-teal-400">{activeQuote.dividendYield ? (activeQuote.dividendYield * 100).toFixed(2) + '%' : 'n/d'}</strong></span>
+                                            <span>P/L: <strong className="text-slate-700 dark:text-slate-300">{activeQuote.priceEarnings ? activeQuote.priceEarnings.toFixed(1) : 'n/d'}</strong></span>
+                                        </div>
+                                    </>
+                                )}
                             </div>
                         </div>
                     )}
@@ -242,7 +315,9 @@ export const InvestmentSimulator: React.FC = () => {
                     <div className="p-4 bg-teal-50/40 dark:bg-teal-950/20 rounded-2xl border border-teal-200/70 dark:border-teal-900/40 text-xs space-y-2">
                         <div className="flex justify-between">
                             <span className="text-slate-600 dark:text-slate-400 font-medium">Quantidade estimada:</span>
-                            <span className="font-bold text-slate-900 dark:text-white">~{estQuantity} cotas/ações</span>
+                            <span className="font-bold text-slate-900 dark:text-white">
+                                ~{estQuantity} {activeQuote?.assetClass === 'CRYPTO' ? 'unidades/frações' : activeQuote?.assetClass === 'FII' ? 'cotas' : 'ações'}
+                            </span>
                         </div>
                         <div className="flex justify-between">
                             <span className="text-slate-600 dark:text-slate-400 font-medium">Concentração no ativo:</span>
