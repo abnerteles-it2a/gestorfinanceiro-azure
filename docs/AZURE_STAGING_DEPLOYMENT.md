@@ -60,6 +60,8 @@ O Gestor Financeiro possui mecanismo de segurança contra compartilhamento de co
 | `AZURE_OPENAI_ENDPOINT` | Endpoint da Cognitive Services | `https://abner-7506-resource.cognitiveservices.azure.com/` |
 | `AZURE_OPENAI_API_KEY` | Chave de autenticação do Foundry | `6CfWHCP2...` |
 | `AZURE_OPENAI_DEPLOYMENT_NAME` | Modelo de IA para chat e advisor | `gpt-4.1` |
+| `COMMUNICATION_SERVICES_CONNECTION_STRING` | String de conexão do Azure Communication Services | `endpoint=https://acs-gestor-prod.unitedstates.communication.azure.com/;accesskey=...` |
+| `AZURE_EMAIL_SENDER` | Remetente verificado do domínio gerenciado Azure | `DoNotReply@f0bc3891-e4c8-4670-880e-54d671987bb5.azurecomm.net` |
 | `PORT` | Porta interna da aplicação | `3000` |
 | `NODE_ENV` | Modo de execução | `production` |
 
