@@ -13,7 +13,7 @@ interface ObligationItem {
 }
 
 export const PredictiveInsightsWidget: React.FC = () => {
-  const { totalBalance, transactions, isPrivacyMode, viewMode } = useFinancialData();
+  const { totalBalance, transactions, isPrivacyMode, viewMode, investments, marketData } = useFinancialData();
   const [dismissed, setDismissed] = useState(false);
   const [selectedHorizon, setSelectedHorizon] = useState<'today' | 'week' | 'month'>('today');
 
@@ -151,10 +151,24 @@ export const PredictiveInsightsWidget: React.FC = () => {
     };
   }, [totalBalance, openPayables, openReceivables, transactions]);
 
+  const topOpportunity = useMemo(() => {
+    let best: { ticker: string; discountPct: number; ceiling: number } | null = null;
+    (investments || []).forEach(inv => {
+      const ticker = inv.ticker?.toUpperCase().trim();
+      const info = marketData[ticker];
+      if (!info || !info.bazinPrice || !info.price || info.price <= 0) return;
+      const margin = ((info.bazinPrice - info.price) / info.price) * 100;
+      if (margin >= 10 && (!best || margin > best.discountPct)) {
+        best = { ticker, discountPct: Number(margin.toFixed(1)), ceiling: info.bazinPrice };
+      }
+    });
+    return best;
+  }, [investments, marketData]);
+
   if (dismissed) return null;
 
   return (
-    <div className="relative overflow-hidden rounded-2xl bg-slate-900 border border-teal-500/25 p-4 sm:p-5 shadow-xl shadow-slate-950/40 animate-fadeIn">
+    <div className="relative overflow-hidden rounded-2xl bg-slate-900 border border-teal-500/25 p-4 sm:p-5 shadow-xl shadow-slate-950/40 animate-fadeIn space-y-3">
       {/* Background ambient lighting */}
       <div className="absolute top-0 right-0 -mt-10 -mr-10 w-48 h-48 rounded-full bg-teal-500/10 blur-3xl pointer-events-none" />
 
@@ -269,6 +283,17 @@ export const PredictiveInsightsWidget: React.FC = () => {
                 Obrigações a pagar ainda em aberto no mês: {isPrivacyMode ? '••••' : formatCurrency(metrics.payMonth)} | Previsão de recebíveis a entrar: {isPrivacyMode ? '••••' : formatCurrency(metrics.recMonth)}.
               </p>
             </>
+          )}
+
+          {topOpportunity && (
+            <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-2 text-xs text-teal-300">
+              <span className="px-2 py-0.5 rounded-md bg-teal-500/20 text-teal-300 text-[9px] font-black uppercase tracking-wider border border-teal-500/30">
+                💡 Oportunidade de Valuation
+              </span>
+              <span className="text-[11px] text-slate-300">
+                Ativo <strong>{topOpportunity.ticker}</strong> opera com <strong>+{topOpportunity.discountPct}% de margem</strong> no Teto Bazin ({formatCurrency(topOpportunity.ceiling)}).
+              </span>
+            </div>
           )}
         </div>
 

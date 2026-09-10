@@ -12,6 +12,8 @@ import { InvestmentSimulator } from './InvestmentSimulator';
 import { SmartRebalancer } from './SmartRebalancer';
 import { TaxReportWidget } from './TaxReportWidget';
 import { UpgradeScreen } from './UpgradeScreen';
+import { DividendCalendar } from './DividendCalendar';
+import { PortfolioRiskMatrix } from './PortfolioRiskMatrix';
 
 const SignalBadge: React.FC<{
     signal?: 'Comprar' | 'Vender' | 'Manter';
@@ -601,9 +603,19 @@ const Investments: React.FC<InvestmentsProps> = ({ onEditInvestment }) => {
                 <InvTabBar active={activeTab} onChange={setActiveTab} />
             </div>
 
-            {activeTab === 'proventos' && <DividendsPanel />}
+            {activeTab === 'proventos' && (
+                <div className="space-y-8">
+                    <DividendCalendar />
+                    <DividendsPanel />
+                </div>
+            )}
             {activeTab === 'rentabilidade' && <PerformancePanel />}
-            {activeTab === 'rebalanceamento' && <SmartRebalancer />}
+            {activeTab === 'rebalanceamento' && (
+                <div className="space-y-8">
+                    <SmartRebalancer />
+                    <PortfolioRiskMatrix />
+                </div>
+            )}
             {activeTab === 'fiscal' && <TaxReportWidget />}
             {activeTab === 'simulador' && <InvestmentSimulator />}
             {activeTab === 'carteira' && <>

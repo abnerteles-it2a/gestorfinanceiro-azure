@@ -11,6 +11,8 @@ import { Modal } from './shared/Modal';
 import { DEFAULT_CATEGORY_EMOJIS } from './SettingsModal';
 import { useToast } from '../context/ToastContext';
 import { UpgradeScreen } from './UpgradeScreen';
+import { PredictiveCashFlow } from './PredictiveCashFlow';
+import { SubscriptionAuditor } from './SubscriptionAuditor';
 
 interface FinanceAccountingProps {
   activeSubTab: 'cashflow' | 'obligations' | 'accounting';
@@ -32,6 +34,8 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
   const [obligationsTab, setObligationsTab] = React.useState<'payables' | 'receivables'>('payables');
   const [newType, setNewType] = React.useState<'ap'|'ar'>('ap');
   const [reloadKey, setReloadKey] = React.useState(0);
+  const [aiAuditReport, setAiAuditReport] = React.useState<string | null>(null);
+  const [isGeneratingAudit, setIsGeneratingAudit] = React.useState(false);
   const [title, setTitle] = React.useState('');
   const [amount, setAmount] = React.useState('');
   const [dueDate, setDueDate] = React.useState(() => new Date().toISOString().slice(0,10));
@@ -284,6 +288,44 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
       loadSnapshots();
     } catch {}
   };
+  const handleGenerateAiAudit = async () => {
+    setIsGeneratingAudit(true);
+    setAiAuditReport(null);
+    try {
+      const token = window.localStorage.getItem('gestor_financeiro_app_token');
+      const headers: Record<string, string> = { 'content-type': 'application/json' };
+      if (token) headers['authorization'] = `Bearer ${token}`;
+
+      const res = await fetch('/api/ai/advice', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          kind: 'accounting_audit',
+          accounting: {
+            month: selectedMonth,
+            grossRevenue: monthIncome,
+            cogs: dreCalculations.cogs,
+            grossProfit: dreCalculations.grossProfit,
+            operatingExpenses: dreCalculations.opex,
+            netProfit: dreCalculations.netResult,
+            topCategories: expenseByCategory.slice(0, 5),
+          }
+        })
+      });
+      const json = await res.json();
+      if (json.text) {
+        setAiAuditReport(json.text);
+        showToast('Parecer Contábil emitido com sucesso pela IA!', 'success');
+      } else {
+        showToast('Não foi possível gerar o parecer no momento.', 'warning');
+      }
+    } catch (e: any) {
+      showToast(e.message || 'Erro ao gerar parecer contábil', 'error');
+    } finally {
+      setIsGeneratingAudit(false);
+    }
+  };
+
   return (
     <div className="space-y-5 lg:space-y-6 animate-fade-in pb-6 px-0.5 sm:px-1">
 
@@ -295,7 +337,7 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
                 onClick={() => setTab('cashflow')}
                 className={`px-3.5 sm:px-5 py-1.5 text-[9.5px] sm:text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap ${tab === 'cashflow' ? 'bg-[#2E7D32] text-white shadow-xs ring-1 ring-slate-200/50' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
             >
-                Fluxo de Caixa
+                Fluxo de Caixa & Projeção
             </button>
             <button 
                 onClick={() => setTab('obligations')}
@@ -312,8 +354,10 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
         </div>
 
         {tab === 'cashflow' && (
-          <div className="animate-slide-up">
+          <div className="animate-slide-up space-y-8">
+            <PredictiveCashFlow />
             <CashFlowView onEditTransaction={onEditTransaction || (() => {})} />
+            <SubscriptionAuditor />
           </div>
         )}
         {tab === 'obligations' && (
@@ -491,9 +535,41 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
 
                   {/* DRE Completa */}
                   <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-                    <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50">
-                      <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Demonstrativo de Resultado de Exercício (DRE)</h3>
+                    <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Demonstrativo de Resultado de Exercício (DRE)</h3>
+                        <p className="text-[10px] text-slate-400">Análise de margens, custos e resultado operacional do período</p>
+                      </div>
+                      <button
+                        onClick={handleGenerateAiAudit}
+                        disabled={isGeneratingAudit}
+                        className="px-3.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-[10px] font-black uppercase tracking-wider shadow-sm transition-all flex items-center gap-1.5 self-start sm:self-auto disabled:opacity-50"
+                      >
+                        <SparklesIcon className="w-3.5 h-3.5" />
+                        <span>{isGeneratingAudit ? 'Auditando...' : 'Emitir Parecer Contábil IA'}</span>
+                      </button>
                     </div>
+
+                    {/* AI Audit Report Drawer if generated */}
+                    {aiAuditReport && (
+                      <div className="p-6 bg-teal-50/20 dark:bg-teal-950/20 border-b border-teal-200/50 dark:border-teal-800/40 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 text-teal-700 dark:text-teal-300">
+                            <SparklesIcon className="w-4 h-4" />
+                            <h4 className="text-xs font-black uppercase tracking-wider">Parecer Contábil & Auditoria de DRE</h4>
+                          </div>
+                          <button
+                            onClick={() => setAiAuditReport(null)}
+                            className="text-[10px] text-slate-400 hover:text-slate-600 uppercase font-bold"
+                          >
+                            Fechar
+                          </button>
+                        </div>
+                        <div className="text-xs leading-relaxed text-slate-700 dark:text-slate-200 whitespace-pre-line bg-white/70 dark:bg-slate-900/70 p-4 rounded-xl border border-teal-100 dark:border-teal-900/50 font-sans">
+                          {aiAuditReport}
+                        </div>
+                      </div>
+                    )}
                     <div className="p-0 overflow-x-auto">
                       <table className="w-full text-sm text-left">
                         <thead>

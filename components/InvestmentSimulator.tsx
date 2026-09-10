@@ -5,11 +5,14 @@ import { TrendingUpIcon } from './icons';
 import { simulateInvestmentPurchase, getMarketData, MarketInfo } from '../services/marketDataService';
 import { useToast } from '../context/ToastContext';
 import { B3_FUNDAMENTAL_BENCHMARKS } from '../api/portfolio/market-data';
+import { MonteCarloSimulator } from './MonteCarloSimulator';
+import { StressTestLab } from './StressTestLab';
 
 export const InvestmentSimulator: React.FC = () => {
     const { investments, totalInvested, portfolioValue, marketData } = useFinancialData();
     const { showToast } = useToast();
 
+    const [simulatorView, setSimulatorView] = useState<'valuation' | 'montecarlo' | 'stresstest'>('valuation');
     const [ticker, setTicker] = useState('PETR4');
     const [amount, setAmount] = useState<number>(1000);
     const [customPrice, setCustomPrice] = useState<number | ''>('');
@@ -320,21 +323,29 @@ export const InvestmentSimulator: React.FC = () => {
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
             {/* Header Strip */}
-            <div className="bg-white/50 dark:bg-slate-900/50 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 backdrop-blur-md shadow-sm">
+            <div className="bg-white/50 dark:bg-slate-900/50 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 backdrop-blur-md shadow-sm space-y-4">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div>
                         <div className="flex items-center gap-2 mb-1">
                             <span className="w-2.5 h-2.5 rounded-full bg-[#0D9488]" />
-                            <h2 className="text-label-caps !text-slate-400">Valuation & Simulador de Aportes</h2>
+                            <h2 className="text-label-caps !text-slate-400">Simulador Institucional & Inteligência Quantitativa</h2>
                         </div>
                         <h3 className="text-xl font-bold text-slate-900 dark:text-white uppercase tracking-tight">
-                            Planejamento Fundamentalista · Graham & Bazin 100% Dinâmicos
+                            {simulatorView === 'valuation'
+                                ? 'Planejamento Fundamentalista · Graham & Bazin Dinâmicos'
+                                : simulatorView === 'montecarlo'
+                                ? 'Simulação Estocástica de Monte Carlo (1.000 Trajetórias)'
+                                : 'Laboratório de Stress Testing · Choques Históricos'}
                         </h3>
                         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-2xl leading-relaxed">
-                            Simule o impacto do seu aporte em tempo real. O algoritmo calcula o Preço Teto Bazin, Preço Justo de Graham, P/VP patrimonial e projeção de renda passiva mensal.
+                            {simulatorView === 'valuation'
+                                ? 'Simule o impacto do seu aporte em tempo real com Preço Teto Bazin, Preço Justo de Graham, P/VP patrimonial e renda passiva mensal.'
+                                : simulatorView === 'montecarlo'
+                                ? 'Projeção estatística de horizontes de até 30 anos com leques de probabilidade P10, P50 e P90 baseados na volatilidade da sua carteira.'
+                                : 'Teste a resiliência do seu portfólio contra crises históricas como Circuit Breakers COVID-19, Joesley Day e Choque de Juros.'}
                         </p>
                     </div>
-                    <div className="hidden lg:flex items-center gap-6 pr-2">
+                    <div className="flex flex-col sm:flex-row items-end md:items-center gap-4">
                         <div className="text-right">
                             <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Patrimônio Base</div>
                             <div className="text-base font-black text-slate-900 dark:text-white tabular-nums">
@@ -343,9 +354,48 @@ export const InvestmentSimulator: React.FC = () => {
                         </div>
                     </div>
                 </div>
+
+                {/* Sub-view switcher bar */}
+                <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-200/60 dark:border-slate-800">
+                    <button
+                        onClick={() => setSimulatorView('valuation')}
+                        className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-2 ${
+                            simulatorView === 'valuation'
+                                ? 'bg-teal-600 text-white shadow-md shadow-teal-600/20'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                        }`}
+                    >
+                        <span>🎯</span> Valuation Graham & Bazin
+                    </button>
+                    <button
+                        onClick={() => setSimulatorView('montecarlo')}
+                        className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-2 ${
+                            simulatorView === 'montecarlo'
+                                ? 'bg-teal-600 text-white shadow-md shadow-teal-600/20'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                        }`}
+                    >
+                        <span>🎲</span> Monte Carlo (1.000 Trajetórias)
+                    </button>
+                    <button
+                        onClick={() => setSimulatorView('stresstest')}
+                        className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-2 ${
+                            simulatorView === 'stresstest'
+                                ? 'bg-teal-600 text-white shadow-md shadow-teal-600/20'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                        }`}
+                    >
+                        <span>⚡</span> Stress Test de Crises
+                    </button>
+                </div>
             </div>
 
-            {/* Main Interactive Grid */}
+            {/* Sub-view Content */}
+            {simulatorView === 'montecarlo' && <MonteCarloSimulator />}
+            {simulatorView === 'stresstest' && <StressTestLab />}
+
+            {simulatorView === 'valuation' && (
+            /* Main Interactive Grid */
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                 
                 {/* Form Controls (5 cols) */}
@@ -693,6 +743,7 @@ export const InvestmentSimulator: React.FC = () => {
                 </div>
 
             </div>
+            )}
         </div>
     );
 };

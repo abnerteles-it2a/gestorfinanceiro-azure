@@ -292,6 +292,47 @@ ${investCtx}`;
           ],
           temperature: 0.4,
         });
+      } else if (kind === 'accounting_audit') {
+        const accData = input?.accounting || ctx?.accounting || {};
+        const monthRef = String(accData.month || new Date().toISOString().slice(0, 7));
+        const grossRev = Number(accData.grossRevenue || 0);
+        const cogs = Number(accData.cogs || 0);
+        const grossProfit = Number(accData.grossProfit || (grossRev - cogs));
+        const opExp = Number(accData.operatingExpenses || 0);
+        const netProfit = Number(accData.netProfit || (grossProfit - opExp));
+        const grossMargin = grossRev > 0 ? ((grossProfit / grossRev) * 100).toFixed(1) : '0.0';
+        const netMargin = grossRev > 0 ? ((netProfit / grossRev) * 100).toFixed(1) : '0.0';
+        const topCategories = Array.isArray(accData.topCategories)
+          ? accData.topCategories.map((c: any) => `- ${c[0]}: ${formatCurrency(Number(c[1]))}`).join('\n')
+          : 'n/d';
+
+        const prompt = `Você é o Diretor Contábil e Auditor Financeiro Sênior do Gestor Financeiro (Padrão CFC / IFRS / CPC).
+Nunca mencione OpenAI, Azure, GPT ou provedores de nuvem.
+Analise a Demonstração do Resultado do Exercício (DRE) gerencial referente ao período de ${monthRef} e elabore um PARECER CONTÁBIL EXECUTIVO rigoroso, elegante e orientativo.
+
+Dados da DRE Gerencial:
+- Mês de Referência: ${monthRef}
+- Receita Bruta Operacional: ${formatCurrency(grossRev)}
+- Custos Operacionais / CPV: ${formatCurrency(cogs)}
+- Lucro Bruto: ${formatCurrency(grossProfit)} (Margem Bruta: ${grossMargin}%)
+- Despesas Operacionais Gerais e Administrativas: ${formatCurrency(opExp)}
+- Lucro Líquido do Período: ${formatCurrency(netProfit)} (Margem Líquida: ${netMargin}%)
+- Maiores Despesas por Categoria:
+${topCategories}
+
+Estrutura Obrigatória do Parecer Executivo:
+1. **Diagnóstico Contábil de Eficiência:** Avaliação da qualidade das margens (bruta e líquida) frente às boas práticas de mercado.
+2. **Análise de Estrutura de Custos & Ponto de Equilíbrio (Break-Even):** Avalie a proporção de despesas operacionais frente à receita e se há alavancagem operacional saudável.
+3. **Identificação de Vulnerabilidades e Ralos de Caixa:** Destaque as categorias que mais pesaram no resultado.
+4. **Plano de Ação Tático (3 Recomendações Imediatas):** Passos objetivos para expansão de margem de lucro líquido e conformidade tributária/contábil.`;
+
+        text = await askAzureOpenAI({
+          messages: [
+            { role: 'system', content: 'Você é o Gestor Financeiro, inteligência contábil e de auditoria gerencial. Seja extremamente técnico, executivo, analítico e elegante em formatação markdown.' },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0.3,
+        });
       } else {
         const prompt = `Você é o advisor financeiro do Gestor Financeiro.
 Analise a saúde financeira do usuário no mês atual e forneça:
