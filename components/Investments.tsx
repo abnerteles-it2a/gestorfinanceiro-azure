@@ -9,6 +9,8 @@ import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip as RechartsTooltip } 
 import { KpiCard } from './KpiCard';
 import { InvTabBar, DividendsPanel, PerformancePanel, type InvTab } from './InvestmentTabs';
 import { InvestmentSimulator } from './InvestmentSimulator';
+import { SmartRebalancer } from './SmartRebalancer';
+import { TaxReportWidget } from './TaxReportWidget';
 import { UpgradeScreen } from './UpgradeScreen';
 
 const SignalBadge: React.FC<{
@@ -430,8 +432,18 @@ const PortfolioHub: React.FC<PortfolioHubProps> = ({
                     </label>
                 </div>
                 <div className="flex items-center gap-3">
+                    <button 
+                        onClick={() => window.dispatchEvent(new CustomEvent('open_concierge_chat'))}
+                        className="px-4 py-2 text-[10px] font-black uppercase tracking-widest bg-teal-500/10 text-teal-700 dark:text-teal-300 rounded-xl border border-teal-500/30 hover:bg-teal-500/20 transition-all flex items-center gap-1.5 shadow-xs"
+                        title="Auditar diversificação e margem de segurança da carteira com o Concierge IA"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span>Auditar com IA</span>
+                    </button>
                     <button onClick={onDetailsClick} className="px-4 py-2 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-700 transition-colors">Log de Sincronia</button>
-                    <button onClick={onAddClick} className="px-5 py-2.5 text-[10px] font-black uppercase tracking-widest bg-indigo-600 text-white rounded-xl shadow-lg shadow-indigo-500/20 hover:bg-indigo-500 transition-all active:scale-95">Novo Ativo</button>
+                    <button onClick={onAddClick} className="px-5 py-2.5 text-[10px] font-black uppercase tracking-widest bg-teal-600 text-white rounded-xl shadow-lg shadow-teal-500/20 hover:bg-teal-500 transition-all active:scale-95">Novo Ativo</button>
                 </div>
             </div>
 
@@ -591,6 +603,8 @@ const Investments: React.FC<InvestmentsProps> = ({ onEditInvestment }) => {
 
             {activeTab === 'proventos' && <DividendsPanel />}
             {activeTab === 'rentabilidade' && <PerformancePanel />}
+            {activeTab === 'rebalanceamento' && <SmartRebalancer />}
+            {activeTab === 'fiscal' && <TaxReportWidget />}
             {activeTab === 'simulador' && <InvestmentSimulator />}
             {activeTab === 'carteira' && <>
             <PortfolioHub 

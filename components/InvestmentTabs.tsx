@@ -5,7 +5,7 @@ import { AssetType } from '../types';
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
-export type InvTab = 'carteira' | 'proventos' | 'rentabilidade' | 'simulador';
+export type InvTab = 'carteira' | 'proventos' | 'rentabilidade' | 'rebalanceamento' | 'fiscal' | 'simulador';
 
 interface DividendItem {
   ticker: string;
@@ -41,6 +41,8 @@ function linearRegression(series: { date: string; close: number }[]) {
 export const InvTabBar: React.FC<{ active: InvTab; onChange: (t: InvTab) => void }> = ({ active, onChange }) => {
   const tabs: { id: InvTab; label: string; icon: string }[] = [
     { id: 'carteira', label: 'Carteira', icon: '📊' },
+    { id: 'rebalanceamento', label: 'Rebalancear', icon: '⚖️' },
+    { id: 'fiscal', label: 'Imposto de Renda', icon: '🧾' },
     { id: 'proventos', label: 'Proventos', icon: '💰' },
     { id: 'rentabilidade', label: 'Rentabilidade', icon: '📈' },
     { id: 'simulador', label: 'Simulador', icon: '🎯' },

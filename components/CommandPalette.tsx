@@ -61,12 +61,39 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       title: 'Concierge IA Financeiro',
       subtitle: 'Tirar dúvidas de finanças, MEI ou planejamento',
       category: 'Inteligência & IA',
-      icon: '🤖',
+      icon: '✨',
       shortcut: 'C',
       perform: () => {
         if (onOpenHelpChat) onOpenHelpChat();
         else window.dispatchEvent(new CustomEvent('open_concierge_chat'));
       }
+    },
+    {
+      id: 'ai-audit',
+      title: 'Auditar Carteira de Investimentos com IA',
+      subtitle: 'Diagnóstico de risco, concentração e Graham/Bazin',
+      category: 'Inteligência & IA',
+      icon: '🎯',
+      perform: () => {
+        onNavigate('investments');
+        setTimeout(() => window.dispatchEvent(new CustomEvent('open_concierge_chat')), 300);
+      }
+    },
+    {
+      id: 'inv-rebalance',
+      title: 'Rebalanceamento de Carteira (Smart Rebalancer)',
+      subtitle: 'Alocação ideal e cálculo de aportes inteligentes',
+      category: 'Ações Rápidas',
+      icon: '⚖️',
+      perform: () => onNavigate('investments')
+    },
+    {
+      id: 'inv-tax',
+      title: 'Radar Fiscal de IR (DARF & Isenções)',
+      subtitle: 'Acompanhar isenção de R$ 20k em Ações e DARF de FIIs',
+      category: 'Ações Rápidas',
+      icon: '🧾',
+      perform: () => onNavigate('investments')
     },
     // Navegação
     {
