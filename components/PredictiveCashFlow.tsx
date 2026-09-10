@@ -57,12 +57,13 @@ export const PredictiveCashFlow: React.FC = () => {
 
     const recentExpenses = transactions.filter(t => isExpenseTx(t.transactionType) && (t.date || '') >= ninetyIso);
     const totalExp = recentExpenses.reduce((s, t) => s + Number(t.amount || 0), 0);
-    return Math.max(totalExp / 3, 1000);
+    // Real mathematical average: if no expenses are recorded, burn rate is strictly 0 (never invent R$ 1.000)
+    return totalExp > 0 ? (totalExp / 3) : 0;
   }, [transactions]);
 
   // Runway in months
   const runwayMonths = useMemo(() => {
-    if (burnRateMonthly <= 0) return 99;
+    if (burnRateMonthly <= 0) return totalBalance > 0 ? '> 24' : '—';
     return Number((Math.max(totalBalance, 0) / burnRateMonthly).toFixed(1));
   }, [totalBalance, burnRateMonthly]);
 
@@ -76,8 +77,8 @@ export const PredictiveCashFlow: React.FC = () => {
     let sumIn = 0;
     let sumOut = 0;
 
-    // Daily recurring baseline expense
-    const dailyBaseline = burnRateMonthly / 30;
+    // Daily recurring baseline expense from real historical burn rate
+    const dailyBaseline = burnRateMonthly > 0 ? (burnRateMonthly / 30) : 0;
 
     for (let d = 0; d <= daysHorizon; d++) {
       const curDate = new Date(today);
@@ -121,7 +122,8 @@ export const PredictiveCashFlow: React.FC = () => {
     };
   }, [totalBalance, daysHorizon, receivables, payables, burnRateMonthly]);
 
-  const hasLiquidityDeficit = minBalance < safetyReserve;
+  // Only trigger deficit alert if there are actual outflows that cause balance to drop below reserve
+  const hasLiquidityDeficit = totalProjectedOutflow > 0 && (minBalance < 0 || minBalance < safetyReserve);
 
   return (
     <div className="bg-white/40 dark:bg-slate-900/40 rounded-3xl p-6 shadow-sm border border-slate-200 dark:border-slate-800 backdrop-blur-sm space-y-6">
@@ -212,19 +214,23 @@ export const PredictiveCashFlow: React.FC = () => {
             {runwayMonths} Meses
           </div>
           <p className="text-[10px] text-slate-500 mt-1">
-            Sem novas receitas com Burn Rate de {formatCurrency(burnRateMonthly)}/mês
+            {burnRateMonthly > 0
+              ? `Sem novas receitas com Burn Rate de ${formatCurrency(burnRateMonthly)}/mês`
+              : 'Sem despesas ou saídas recorrentes registradas'}
           </p>
         </div>
 
         <div className={`p-4 rounded-2xl border ${minBalance < 0 ? 'bg-rose-50/40 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/30' : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'}`}>
           <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-slate-400">
             <span>Ponto Mínimo (Vale de Caixa)</span>
-            <span>Em {minBalanceDate}</span>
+            <span>{totalProjectedOutflow > 0 ? `Em ${minBalanceDate}` : 'Estável'}</span>
           </div>
           <div className={`text-2xl font-black font-mono mt-1 ${minBalance < 0 ? 'text-rose-600' : 'text-slate-900 dark:text-white'}`}>
             {formatCurrency(minBalance)}
           </div>
-          <p className="text-[10px] text-slate-500 mt-1">Menor saldo previsto no período</p>
+          <p className="text-[10px] text-slate-500 mt-1">
+            {totalProjectedOutflow > 0 ? 'Menor saldo previsto no período' : 'Nenhuma saída ou obrigação prevista'}
+          </p>
         </div>
 
         <div className="p-4 rounded-2xl bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-900/30">
