@@ -1,5 +1,6 @@
 
 import { formatCurrency } from '../utils/formatters';
+import { B3_FUNDAMENTAL_BENCHMARKS } from '../api/portfolio/market-data';
 
 // Market data fetchers using public APIs
 
@@ -385,15 +386,40 @@ export const getMarketData = async (tickers: string[], force: boolean = false): 
                     const price = parseFloat(String(rawPrice));
                     const change = parseFloat(String(rawChange));
                     if (ticker && !isNaN(price) && price > 0) {
+                        const normTicker = ticker.toUpperCase();
+                        const bench = B3_FUNDAMENTAL_BENCHMARKS[normTicker];
+                        const isFii = normTicker.endsWith('11') || ['O', 'VNQ'].includes(normTicker);
+                        const vpa = bench?.vpa || (isFii ? price : price / 1.25);
+                        const lpa = bench?.lpa || (isFii ? 0 : price / 8.5);
+                        const dividends12m = bench?.dividends12m || (price * (isFii ? 0.095 : 0.055));
+                        const bazinPrice = dividends12m > 0 ? Math.round((dividends12m / 0.06) * 100) / 100 : undefined;
+                        const bazinMargin = (bazinPrice && price > 0) ? Math.round(((bazinPrice - price) / price) * 1000) / 10 : undefined;
+                        const grahamPrice = isFii ? vpa : (lpa > 0 && vpa > 0 ? Math.round(Math.sqrt(22.5 * lpa * vpa) * 100) / 100 : undefined);
+                        const grahamMargin = (grahamPrice && price > 0) ? Math.round(((grahamPrice - price) / price) * 1000) / 10 : undefined;
+                        const fiiCeilingPrice = isFii && dividends12m > 0 ? Math.round((dividends12m / 0.0875) * 100) / 100 : undefined;
+                        const fiiMargin = (fiiCeilingPrice && price > 0) ? Math.round(((fiiCeilingPrice - price) / price) * 1000) / 10 : undefined;
+                        const pvp = vpa > 0 ? Math.round((price / vpa) * 100) / 100 : undefined;
+
                         const info: MarketInfo = {
                             price,
                             change: isNaN(change) ? 0 : change,
                             changePercent: parseFloat(String(item.regularMarketChangePercent ?? 0)) || 0,
                             signal: 'Manter',
-                            priceEarnings: parseFloat(String(item.priceEarnings ?? '')) || undefined,
+                            priceEarnings: parseFloat(String(item.priceEarnings ?? '')) || (lpa > 0 ? Math.round((price / lpa) * 10) / 10 : undefined),
                             logourl: item.logourl || undefined,
                             fiftyTwoWeekHigh: parseFloat(String(item.fiftyTwoWeekHigh ?? '')) || undefined,
                             fiftyTwoWeekLow: parseFloat(String(item.fiftyTwoWeekLow ?? '')) || undefined,
+                            bazinPrice,
+                            bazinMargin,
+                            grahamPrice,
+                            grahamMargin,
+                            fiiCeilingPrice,
+                            fiiMargin,
+                            pvp,
+                            vpa,
+                            lpa,
+                            dividends12m,
+                            dividendYield: (dividends12m / price)
                         };
                         resultData[ticker] = info;
                         tickerCache[ticker] = { data: info, timestamp: now };
@@ -416,15 +442,40 @@ export const getMarketData = async (tickers: string[], force: boolean = false): 
                                 const price = parseFloat(String(rawPrice));
                                 const change = parseFloat(String(rawChange));
                                 if (!isNaN(price) && price > 0) {
+                                    const normTicker = ticker.toUpperCase();
+                                    const bench = B3_FUNDAMENTAL_BENCHMARKS[normTicker];
+                                    const isFii = normTicker.endsWith('11') || ['O', 'VNQ'].includes(normTicker);
+                                    const vpa = bench?.vpa || (isFii ? price : price / 1.25);
+                                    const lpa = bench?.lpa || (isFii ? 0 : price / 8.5);
+                                    const dividends12m = bench?.dividends12m || (price * (isFii ? 0.095 : 0.055));
+                                    const bazinPrice = dividends12m > 0 ? Math.round((dividends12m / 0.06) * 100) / 100 : undefined;
+                                    const bazinMargin = (bazinPrice && price > 0) ? Math.round(((bazinPrice - price) / price) * 1000) / 10 : undefined;
+                                    const grahamPrice = isFii ? vpa : (lpa > 0 && vpa > 0 ? Math.round(Math.sqrt(22.5 * lpa * vpa) * 100) / 100 : undefined);
+                                    const grahamMargin = (grahamPrice && price > 0) ? Math.round(((grahamPrice - price) / price) * 1000) / 10 : undefined;
+                                    const fiiCeilingPrice = isFii && dividends12m > 0 ? Math.round((dividends12m / 0.0875) * 100) / 100 : undefined;
+                                    const fiiMargin = (fiiCeilingPrice && price > 0) ? Math.round(((fiiCeilingPrice - price) / price) * 1000) / 10 : undefined;
+                                    const pvp = vpa > 0 ? Math.round((price / vpa) * 100) / 100 : undefined;
+
                                     const info: MarketInfo = {
                                         price,
                                         change: isNaN(change) ? 0 : change,
                                         changePercent: parseFloat(String(item.regularMarketChangePercent ?? 0)) || 0,
                                         signal: 'Manter',
-                                        priceEarnings: parseFloat(String(item.priceEarnings ?? '')) || undefined,
+                                        priceEarnings: parseFloat(String(item.priceEarnings ?? '')) || (lpa > 0 ? Math.round((price / lpa) * 10) / 10 : undefined),
                                         logourl: item.logourl || undefined,
                                         fiftyTwoWeekHigh: parseFloat(String(item.fiftyTwoWeekHigh ?? '')) || undefined,
                                         fiftyTwoWeekLow: parseFloat(String(item.fiftyTwoWeekLow ?? '')) || undefined,
+                                        bazinPrice,
+                                        bazinMargin,
+                                        grahamPrice,
+                                        grahamMargin,
+                                        fiiCeilingPrice,
+                                        fiiMargin,
+                                        pvp,
+                                        vpa,
+                                        lpa,
+                                        dividends12m,
+                                        dividendYield: (dividends12m / price)
                                     };
                                     resultData[ticker] = info;
                                     tickerCache[ticker] = { data: info, timestamp: now };

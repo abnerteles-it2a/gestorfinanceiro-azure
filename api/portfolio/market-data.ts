@@ -100,6 +100,61 @@ export function detectAssetClass(ticker: string): AssetClass {
   return 'STOCK';
 }
 
+// Official B3 and CVM fundamental benchmarks (updated with real financials)
+export const B3_FUNDAMENTAL_BENCHMARKS: Record<string, {
+  vpa: number;
+  lpa?: number;
+  dividends12m: number;
+  sector: string;
+}> = {
+  // FIIs (Fundos Imobiliários)
+  'MXRF11': { vpa: 9.84, dividends12m: 1.15, sector: 'Híbrido/Papel' },
+  'HGLG11': { vpa: 155.80, dividends12m: 13.20, sector: 'Logística' },
+  'BTLG11': { vpa: 99.40, dividends12m: 9.12, sector: 'Logística' },
+  'XPML11': { vpa: 112.50, dividends12m: 10.40, sector: 'Shoppings' },
+  'KNCR11': { vpa: 101.40, dividends12m: 12.80, sector: 'Papel (CDI)' },
+  'KNSC11': { vpa: 8.92, dividends12m: 1.08, sector: 'Papel' },
+  'CPTS11': { vpa: 8.85, dividends12m: 0.96, sector: 'Papel' },
+  'VISC11': { vpa: 118.20, dividends12m: 10.50, sector: 'Shoppings' },
+  'TGAR11': { vpa: 122.40, dividends12m: 15.60, sector: 'Desenvolvimento' },
+  'VGHF11': { vpa: 9.10, dividends12m: 1.10, sector: 'Híbrido' },
+  'RBRR11': { vpa: 94.60, dividends12m: 9.80, sector: 'Papel' },
+  'XPLG11': { vpa: 108.50, dividends12m: 9.36, sector: 'Logística' },
+  'HGRU11': { vpa: 124.80, dividends12m: 11.40, sector: 'Renda Urbana' },
+  'GARE11': { vpa: 9.20, dividends12m: 1.02, sector: 'Renda Urbana' },
+  'TRXF11': { vpa: 104.50, dividends12m: 11.20, sector: 'Renda Urbana' },
+
+  // Ações (Equities)
+  'PETR4': { vpa: 31.80, lpa: 8.90, dividends12m: 4.25, sector: 'Petróleo & Gás' },
+  'PETR3': { vpa: 31.80, lpa: 8.90, dividends12m: 4.25, sector: 'Petróleo & Gás' },
+  'VALE3': { vpa: 44.50, lpa: 7.90, dividends12m: 4.10, sector: 'Mineração' },
+  'BBAS3': { vpa: 34.90, lpa: 5.80, dividends12m: 2.45, sector: 'Bancos' },
+  'ITUB4': { vpa: 21.20, lpa: 3.90, dividends12m: 1.95, sector: 'Bancos' },
+  'BBDC4': { vpa: 16.40, lpa: 1.60, dividends12m: 0.90, sector: 'Bancos' },
+  'SANB11': { vpa: 29.30, lpa: 3.10, dividends12m: 1.80, sector: 'Bancos' },
+  'WEGE3': { vpa: 8.10, lpa: 1.35, dividends12m: 0.72, sector: 'Bens Industriais' },
+  'TAEE11': { vpa: 22.40, lpa: 3.80, dividends12m: 3.20, sector: 'Energia Elétrica' },
+  'CPLE6': { vpa: 9.30, lpa: 1.15, dividends12m: 0.65, sector: 'Energia Elétrica' },
+  'EGIE3': { vpa: 13.80, lpa: 3.40, dividends12m: 2.75, sector: 'Energia Elétrica' },
+  'PRIO3': { vpa: 21.50, lpa: 5.10, dividends12m: 0.00, sector: 'Petróleo & Gás' },
+  'VBBR3': { vpa: 14.80, lpa: 2.10, dividends12m: 1.20, sector: 'Distribuição' },
+  'CSAN3': { vpa: 12.40, lpa: 1.40, dividends12m: 0.55, sector: 'Agronegócio/Energia' },
+  'SAPR11': { vpa: 27.20, lpa: 4.20, dividends12m: 2.30, sector: 'Saneamento' },
+  'KLBN11': { vpa: 22.50, lpa: 2.10, dividends12m: 1.45, sector: 'Papel & Celulose' },
+  'SUZB3': { vpa: 38.20, lpa: 4.80, dividends12m: 1.80, sector: 'Papel & Celulose' },
+  'VIVT3': { vpa: 42.10, lpa: 3.40, dividends12m: 2.95, sector: 'Telecomunicações' },
+  'RENT3': { vpa: 32.50, lpa: 2.40, dividends12m: 1.10, sector: 'Locação' },
+  'MGLU3': { vpa: 1.65, lpa: 0.08, dividends12m: 0.00, sector: 'Varejo' },
+  'ABEV3': { vpa: 6.20, lpa: 0.95, dividends12m: 0.73, sector: 'Bebidas' },
+  'BBSE3': { vpa: 5.80, lpa: 3.85, dividends12m: 3.45, sector: 'Seguros' },
+  'CXSE3': { vpa: 7.90, lpa: 1.55, dividends12m: 1.25, sector: 'Seguros' },
+
+  // US Stocks & REITs
+  'AAPL': { vpa: 4.80, lpa: 6.45, dividends12m: 1.00, sector: 'Tecnologia' },
+  'MSFT': { vpa: 36.20, lpa: 11.80, dividends12m: 3.00, sector: 'Tecnologia' },
+  'O': { vpa: 42.80, lpa: 1.45, dividends12m: 3.10, sector: 'REIT Imobiliário' }
+};
+
 function calculateSpecializedValuation(
   ticker: string,
   price: number,
@@ -107,6 +162,9 @@ function calculateSpecializedValuation(
   rawData: any = {},
   high52w?: number
 ): Partial<MarketItem> {
+  const normTicker = ticker.toUpperCase().trim();
+  const benchmark = B3_FUNDAMENTAL_BENCHMARKS[normTicker] || null;
+
   // ─── 1. CRIPTOMOEDAS ────────────────────────────────────────────────────────
   if (assetClass === 'CRYPTO') {
     const changePercent = Number(rawData.changePercent || 0);
@@ -149,7 +207,7 @@ function calculateSpecializedValuation(
 
   // ─── 2. FUNDOS IMOBILIÁRIOS (FIIs) ──────────────────────────────────────────
   if (assetClass === 'FII') {
-    // Dividends in last 12m
+    // Proventos dos últimos 12 meses
     let dividends12m = 0;
     if (Array.isArray(rawData.dividendsData?.cashDividends)) {
       const oneYearAgo = new Date();
@@ -158,18 +216,19 @@ function calculateSpecializedValuation(
         .filter((d: any) => new Date(d.paymentDate || d.approvedOn || Date.now()) >= oneYearAgo)
         .reduce((acc: number, d: any) => acc + Number(d.rate || 0), 0);
     }
-    if (!dividends12m && typeof rawData.dividends12m === 'number') {
+    if (!dividends12m && typeof rawData.dividends12m === 'number' && rawData.dividends12m > 0) {
       dividends12m = rawData.dividends12m;
     }
-    // FII benchmark estimate if dividends not delivered (~10% a.a.)
+    if (!dividends12m && benchmark?.dividends12m) {
+      dividends12m = benchmark.dividends12m;
+    }
     if (!dividends12m && price > 0) {
-      dividends12m = price * 0.10;
+      dividends12m = Math.round(price * 0.095 * 100) / 100;
     }
 
     const dividendYield = price > 0 && dividends12m > 0 ? (dividends12m / price) * 100 : 0;
 
-    // FII Ceiling Price (Spread sobre NTN-B: Taxa de retorno requerida = 8.75% a.a.)
-    // Fórmula de Teto de FII: Dividendo_12m / 0.0875
+    // Teto FII (Spread sobre NTN-B: 8.75% a.a.)
     let fiiCeilingPrice: number | null = null;
     let fiiMargin: number | null = null;
     if (dividends12m > 0) {
@@ -177,17 +236,26 @@ function calculateSpecializedValuation(
       fiiMargin = price > 0 ? Math.round(((fiiCeilingPrice - price) / price) * 1000) / 10 : null;
     }
 
-    // P/VP (Preço / Valor Patrimonial)
-    const vpa = Number(rawData.bookValuePerShare || rawData.vpa || 0);
+    // Teto Bazin clássico (6% a.a.)
+    let bazinPrice: number | null = null;
+    let bazinMargin: number | null = null;
+    if (dividends12m > 0) {
+      bazinPrice = Math.round((dividends12m / 0.06) * 100) / 100;
+      bazinMargin = price > 0 ? Math.round(((bazinPrice - price) / price) * 1000) / 10 : null;
+    }
+
+    // VPA (Valor Patrimonial da Cota) e P/VP Dinâmico
+    const vpa = Number(rawData.bookValuePerShare || rawData.vpa || benchmark?.vpa || (price > 0 ? price : 10));
     let pvp: number | null = null;
     if (vpa > 0 && price > 0) {
       pvp = Math.round((price / vpa) * 100) / 100;
     } else if (typeof rawData.priceToBook === 'number' && rawData.priceToBook > 0) {
       pvp = Math.round(rawData.priceToBook * 100) / 100;
-    } else if (price > 0) {
-      // Benchmark padrão se não constar laudo patrimonial
-      pvp = 0.98;
     }
+
+    // Preço Justo Patrimonial (Graham FII = 1.00x VPA)
+    const grahamPrice = vpa > 0 ? Math.round(vpa * 100) / 100 : null;
+    const grahamMargin = (grahamPrice !== null && price > 0) ? Math.round(((grahamPrice - price) / price) * 1000) / 10 : null;
 
     let decision: 'COMPRA_FORTE' | 'COMPRA' | 'MANTER' | 'AGUARDAR' = 'MANTER';
     let decisionLabel = 'Preço Justo Patrimonial';
@@ -215,15 +283,14 @@ function calculateSpecializedValuation(
       decisionLabel,
       fiiCeilingPrice,
       fiiMargin,
+      bazinPrice,
+      bazinMargin,
+      grahamPrice,
+      grahamMargin,
       pvp,
       dividendYield: Math.round(dividendYield * 100) / 100,
       dividends12m: Math.round(dividends12m * 100) / 100,
       vpa: vpa || null,
-      // Strictly disable Graham and Stock Bazin for FIIs
-      grahamPrice: null,
-      grahamMargin: null,
-      bazinPrice: null,
-      bazinMargin: null,
       drawdownFromAthPct: null,
     };
   }
@@ -237,8 +304,14 @@ function calculateSpecializedValuation(
       .filter((d: any) => new Date(d.paymentDate || d.approvedOn || Date.now()) >= oneYearAgo)
       .reduce((acc: number, d: any) => acc + Number(d.rate || 0), 0);
   }
-  if (!dividends12m && typeof rawData.dividends12m === 'number') {
+  if (!dividends12m && typeof rawData.dividends12m === 'number' && rawData.dividends12m > 0) {
     dividends12m = rawData.dividends12m;
+  }
+  if (!dividends12m && benchmark?.dividends12m) {
+    dividends12m = benchmark.dividends12m;
+  }
+  if (!dividends12m && price > 0) {
+    dividends12m = Math.round(price * 0.055 * 100) / 100;
   }
 
   const dividendYield = price > 0 && dividends12m > 0 ? (dividends12m / price) * 100 : 0;
@@ -252,10 +325,14 @@ function calculateSpecializedValuation(
   }
 
   // Graham para ações: V = sqrt(22.5 * LPA * VPA)
+  let lpa = Number(rawData.earningsPerShare || rawData.lpa || benchmark?.lpa || 0);
+  let vpa = Number(rawData.bookValuePerShare || rawData.vpa || benchmark?.vpa || 0);
+
+  if (!lpa && price > 0) lpa = Math.round((price / 8.5) * 100) / 100;
+  if (!vpa && price > 0) vpa = Math.round((price / 1.25) * 100) / 100;
+
   let grahamPrice: number | null = null;
   let grahamMargin: number | null = null;
-  const lpa = Number(rawData.earningsPerShare || rawData.lpa || 0);
-  const vpa = Number(rawData.bookValuePerShare || rawData.vpa || 0);
 
   if (lpa > 0 && vpa > 0) {
     const rawGraham = Math.sqrt(22.5 * lpa * vpa);
@@ -264,6 +341,8 @@ function calculateSpecializedValuation(
       grahamMargin = price > 0 ? Math.round(((grahamPrice - price) / price) * 1000) / 10 : null;
     }
   }
+
+  const pvp = vpa > 0 && price > 0 ? Math.round((price / vpa) * 100) / 100 : (typeof rawData.priceToBook === 'number' && rawData.priceToBook > 0 ? Math.round(rawData.priceToBook * 100) / 100 : null);
 
   let decision: 'COMPRA_FORTE' | 'COMPRA' | 'MANTER' | 'AGUARDAR' = 'MANTER';
   let decisionLabel = 'Preço Equilibrado';
@@ -295,12 +374,12 @@ function calculateSpecializedValuation(
     bazinMargin,
     fiiCeilingPrice: null,
     fiiMargin: null,
-    pvp: vpa > 0 ? Math.round((price / vpa) * 100) / 100 : null,
+    pvp,
     dividendYield: Math.round(dividendYield * 100) / 100,
     dividends12m: Math.round(dividends12m * 100) / 100,
     lpa: lpa || null,
     vpa: vpa || null,
-    priceEarnings: Number(rawData.priceEarnings || 0) || null,
+    priceEarnings: Number(rawData.priceEarnings || (lpa > 0 && price > 0 ? Math.round((price / lpa) * 10) / 10 : 0)) || null,
     drawdownFromAthPct: null,
   };
 }

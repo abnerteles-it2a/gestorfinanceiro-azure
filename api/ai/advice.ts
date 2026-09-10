@@ -200,11 +200,12 @@ CRITÉRIO OBRIGATÓRIO DE FII:
 - NUNCA mencione Graham (inaplicável a FIIs, pois FIIs distribuem 95% do caixa e não retêm lucro líquido).
 - NUNCA use o Bazin clássico de 6% (inadequado para o custo de oportunidade brasileiro, onde a NTN-B paga mais de 6% real).
 - As métricas fundamentais de FIIs são:
-  1. P/VP (Preço sobre Valor Patrimonial): ${simData.pvp ? simData.pvp : 'Aprox. 0.98'} (P/VP < 0.98 indica desconto patrimonial; P/VP > 1.05 indica ágio perigoso).
+  1. P/VP (Preço sobre Valor Patrimonial): ${simData.pvp ? Number(simData.pvp).toFixed(2) : 'n/d'} (P/VP < 1.00 indica desconto patrimonial em relação ao laudo; P/VP > 1.05 indica ágio).
   2. Preço Teto de FII (Spread sobre NTN-B: taxa de desconto de 8.75% a.a.): ${simData.fiiCeilingPrice > 0 ? formatCurrency(simData.fiiCeilingPrice) : 'n/d'}.
-  3. Dividend Yield 12M: ${dy.toFixed(2)}%.
-  4. Tipo de Ativo: Analise se o fundo é de Tijolo (Logística, Lajes Corporativas, Shoppings) ou de Papel (CRIs).
-  5. Riscos do Setor: Vacância física e financeira (se tijolo), inadimplência de devedores / indexador IPCA/CDI (se papel), risco de diluição por novas emissões de cotas abaixo do VP e fatos relevantes recentes.
+  3. Preço Teto Bazin Clássico (DY min 6%): ${simData.bazinPrice > 0 ? formatCurrency(simData.bazinPrice) : 'n/d'}.
+  4. Dividend Yield 12M: ${dy.toFixed(2)}%.
+  5. Tipo de Ativo: Analise se o fundo é de Tijolo (Logística, Lajes Corporativas, Shoppings) ou de Papel (CRIs).
+  6. Riscos do Setor: Vacância física e financeira (se tijolo), inadimplência de devedores / indexador IPCA/CDI (se papel), risco de diluição por novas emissões de cotas abaixo do VP e fatos relevantes recentes.
 
 Dados do Aporte:
 - Ativo: ${targetTicker} (${assetType})
