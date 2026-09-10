@@ -57,6 +57,28 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       }
     },
     {
+      id: 'import-statement',
+      title: 'Importar Extrato Bancário (.OFX / .CSV)',
+      subtitle: 'Upload de extratos bancários com conciliação e anti-duplicação',
+      category: 'Ações Rápidas',
+      icon: '📥',
+      shortcut: 'E',
+      perform: () => {
+        onNavigate('cashflow');
+        setTimeout(() => window.dispatchEvent(new CustomEvent('gestor_financeiro_import_statement')), 200);
+      }
+    },
+    {
+      id: 'leak-radar',
+      title: 'Radar de Recorrências & Vazamentos de Caixa',
+      subtitle: 'Identificar assinaturas ativas, aumento de preços e tarifas bancárias',
+      category: 'Inteligência & IA',
+      icon: '🛡️',
+      perform: () => {
+        onNavigate('cashflow');
+      }
+    },
+    {
       id: 'ai-concierge',
       title: 'Concierge IA Financeiro',
       subtitle: 'Tirar dúvidas de finanças, MEI ou planejamento',

@@ -141,6 +141,7 @@ interface FinancialDataContextType {
     updateAccount: (id: string, updates: Partial<BankAccount>) => Promise<void>;
     deleteAccount: (id: string) => Promise<void>;
     addTransaction: (transaction: Omit<Transaction, 'id'>) => Promise<void>;
+    addTransactionsBatch?: (transactions: Omit<Transaction, 'id'>[]) => Promise<number>;
     updateTransaction: (id: string, updates: Partial<Transaction>) => Promise<void>;
     deleteTransaction: (id: string) => Promise<void>;
     isMei: boolean;
@@ -891,6 +892,62 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
         } catch {}
     };
 
+    const addTransactionsBatch = async (items: Omit<Transaction, 'id'>[]): Promise<number> => {
+        if (!items || items.length === 0) return 0;
+        let insertedCount = 0;
+        const newLocalTxs: Transaction[] = [];
+
+        for (const transaction of items) {
+            if (dbProvider === 'neon' && user) {
+                try {
+                    const j = await callApi('transactions_insert', {
+                        date: transaction.date,
+                        accountId: transaction.accountId,
+                        toAccountId: transaction.toAccountId ?? null,
+                        transactionType: transaction.transactionType,
+                        category: transaction.category,
+                        description: transaction.description ?? null,
+                        amount: transaction.amount,
+                        paymentMethod: transaction.paymentMethod ?? null,
+                        costCenterId: transaction.costCenterId ?? null,
+                        isBusinessRevenue: transaction.isBusinessRevenue ?? false,
+                        isBusinessExpense: transaction.isBusinessExpense ?? false
+                    });
+                    if (!j?.error && j?.rows?.[0]) {
+                        const rrow = j.rows[0];
+                        newLocalTxs.push({
+                            id: rrow.id,
+                            date: rrow.date,
+                            accountId: rrow.account_id,
+                            toAccountId: rrow.to_account_id || undefined,
+                            transactionType: rrow.transaction_type,
+                            category: rrow.category,
+                            description: rrow.description || '',
+                            amount: Number(rrow.amount || 0),
+                            paymentMethod: rrow.payment_method || '',
+                            costCenterId: rrow.cost_center_id || undefined,
+                            isBusinessRevenue: !!rrow.is_business_revenue,
+                            isBusinessExpense: !!rrow.is_business_expense
+                        });
+                        insertedCount++;
+                        continue;
+                    }
+                } catch (e) {
+                    console.error("Batch insert item error:", e);
+                }
+            }
+            newLocalTxs.push({
+                ...transaction,
+                id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : (new Date().toISOString() + '_' + Math.random().toString(36).substring(2, 9))
+            });
+            insertedCount++;
+        }
+
+        setTransactions(prev => [...newLocalTxs, ...prev].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+        showToast(`${insertedCount} lançamento(s) importado(s) com sucesso!`, 'success');
+        return insertedCount;
+    };
+
     const addInvestment = async (investment: Omit<Investment, 'id'>) => {
         if (user) {
             const j = await callApi('investments_insert', { type: investment.type, ticker: investment.ticker || null, quantity: investment.quantity ?? null, purchasePrice: investment.purchasePrice ?? null, purchaseDate: investment.purchaseDate || null });
@@ -1495,6 +1552,7 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
         updateAccount,
         deleteAccount,
         addTransaction,
+        addTransactionsBatch,
         updateTransaction,
         deleteTransaction,
         appendTransactionsLocal,

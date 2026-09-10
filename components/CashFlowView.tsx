@@ -6,10 +6,12 @@ import type { Transaction } from '../types';
 import { TransactionType } from '../types';
 import { formatCurrency, formatDate, dateKey } from '../utils/formatters';
 import { isIncomeTx, isTransferTx } from '../utils/transactionHelpers';
-import { PlusIcon, TrendingUpIcon } from './icons';
+import { PlusIcon, TrendingUpIcon, UploadIcon } from './icons';
 import { ArrowDownIcon, ArrowUpIcon, EditIcon, TrashIcon, SearchIcon, CalendarIcon } from './icons';
 import { StatusTag } from './ui/StatusTag';
 import { EmptyState } from './ui/EmptyState';
+import { BankStatementImporterModal } from './BankStatementImporterModal';
+import { SubscriptionLeakRadar } from './SubscriptionLeakRadar';
 
 import { KpiCard } from './KpiCard';
 
@@ -98,6 +100,14 @@ const CashFlowView: React.FC<CashFlowViewProps> = ({ onEditTransaction }) => {
     const [startDate, setStartDate] = useState(initialStart);
     const [endDate, setEndDate] = useState(initialEnd);
     const [loadingMore, setLoadingMore] = useState(false);
+    const [isImporterOpen, setIsImporterOpen] = useState(false);
+    const [subTab, setSubTab] = useState<'fluxo' | 'radar'>('fluxo');
+
+    useEffect(() => {
+        const handleOpenImporter = () => setIsImporterOpen(true);
+        window.addEventListener('gestor_financeiro_import_statement', handleOpenImporter);
+        return () => window.removeEventListener('gestor_financeiro_import_statement', handleOpenImporter);
+    }, []);
 
     const { 
         transactionsByDay, 
@@ -163,10 +173,18 @@ const CashFlowView: React.FC<CashFlowViewProps> = ({ onEditTransaction }) => {
         <div className="space-y-10 pb-8">
             <div className="flex flex-col sm:flex-row items-baseline sm:items-center justify-between gap-4 px-1">
                 <div className="flex flex-col gap-1">
-                    <h1 className="text-label-caps !text-slate-400">Fluxo de Caixa Diário</h1>
-                    <p className="text-[10px] text-slate-500 font-medium uppercase tracking-widest">Controle de Movimentações e Saldo Operacional</p>
+                    <h1 className="text-label-caps !text-slate-400">Fluxo de Caixa & Tesouraria</h1>
+                    <p className="text-[10px] text-slate-500 font-medium uppercase tracking-widest">Controle Operacional, Extratos Bancários e Análise de Recorrências</p>
                 </div>
                 <div className="flex items-center gap-3">
+                    <button
+                        onClick={() => setIsImporterOpen(true)}
+                        className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-md bg-[#0D9488] hover:bg-[#0F766E] text-white shadow-sm shadow-teal-500/20 transition-all flex items-center gap-1.5 active:scale-95"
+                        title="Importar extrato bancário .OFX ou .CSV"
+                    >
+                        <UploadIcon className="w-3.5 h-3.5" />
+                        <span>Importar Extrato</span>
+                    </button>
                     <button
                         onClick={() => {
                             const header = ['Data','Descrição','Categoria','Centro de Custo','Conta','Método','Tipo','Valor'];
@@ -200,6 +218,37 @@ const CashFlowView: React.FC<CashFlowViewProps> = ({ onEditTransaction }) => {
                 </div>
             </div>
 
+            {/* Sub-view Navigation Switcher */}
+            <div className="flex items-center gap-2 border-b border-slate-200/80 dark:border-slate-800 pb-2">
+                <button
+                    onClick={() => setSubTab('fluxo')}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                        subTab === 'fluxo'
+                            ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
+                            : 'text-slate-500 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-slate-800/60'
+                    }`}
+                >
+                    Fluxo Diário Operacional
+                </button>
+                <button
+                    onClick={() => setSubTab('radar')}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 ${
+                        subTab === 'radar'
+                            ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
+                            : 'text-slate-500 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-slate-800/60'
+                    }`}
+                >
+                    <span>Radar de Custos & Assinaturas</span>
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest bg-rose-500 text-white">
+                        Anti-Vazamento
+                    </span>
+                </button>
+            </div>
+
+            {subTab === 'radar' ? (
+                <SubscriptionLeakRadar />
+            ) : (
+                <>
             {/* Toolbar: Filtros Operacionais */}
             <div className="bg-white/80 dark:bg-slate-900/80 p-5 rounded-2xl shadow-sm border border-slate-200/60 dark:border-slate-800/60 backdrop-blur-sm">
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-5">
@@ -365,6 +414,14 @@ const CashFlowView: React.FC<CashFlowViewProps> = ({ onEditTransaction }) => {
                     </>
                 )}
             </div>
+            </>
+            )}
+
+            <BankStatementImporterModal
+                isOpen={isImporterOpen}
+                onClose={() => setIsImporterOpen(false)}
+                defaultAccountId={selectedAccount}
+            />
         </div>
     );
 };
