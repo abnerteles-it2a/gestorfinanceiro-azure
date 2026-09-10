@@ -69,13 +69,117 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       }
     },
     {
+      id: 'closing-dossier',
+      title: 'Dossiê Executivo de Fechamento Mensal',
+      subtitle: 'Balanço consolidado, conciliação de tesouraria, DRE e checklist formal',
+      category: 'Inteligência & IA',
+      icon: '🏛️',
+      shortcut: 'R',
+      perform: () => {
+        onNavigate('reports');
+        setTimeout(() => window.dispatchEvent(new CustomEvent('gestor_financeiro_set_reports_tab', { detail: { tab: 'fechamento' } })), 100);
+      }
+    },
+    {
+      id: 'predictive-cashflow',
+      title: 'Radar Preditivo de Fluxo de Caixa (30 / 60 / 90 Dias)',
+      subtitle: 'Curva diária de liquidez, detecção de vale de caixa e cálculo de runway',
+      category: 'Inteligência & IA',
+      icon: '🔮',
+      shortcut: 'F',
+      perform: () => {
+        onNavigate('financeAccounting');
+        setTimeout(() => window.dispatchEvent(new CustomEvent('gestor_financeiro_set_finance_tab', { detail: { tab: 'cashflow' } })), 100);
+      }
+    },
+    {
+      id: 'inv-monte-carlo',
+      title: 'Simulação de Monte Carlo (1.000 Cenários)',
+      subtitle: 'Projeção probabilística de patrimônio (P10, P50, P90) com desconto de inflação IPCA',
+      category: 'Inteligência & IA',
+      icon: '🎲',
+      shortcut: 'M',
+      perform: () => {
+        onNavigate('investments');
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('gestor_financeiro_set_investments_tab', { detail: { tab: 'simulador' } }));
+          window.dispatchEvent(new CustomEvent('gestor_financeiro_set_simulador_view', { detail: { view: 'montecarlo' } }));
+        }, 100);
+      }
+    },
+    {
+      id: 'inv-stress-test',
+      title: 'Stress Test de Crises Históricas',
+      subtitle: 'Simulação de choque: COVID-19 (-35%), Joesley Day (-10.5%), Subprime e Hiper-Juros',
+      category: 'Inteligência & IA',
+      icon: '⚡',
+      shortcut: 'S',
+      perform: () => {
+        onNavigate('investments');
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('gestor_financeiro_set_investments_tab', { detail: { tab: 'simulador' } }));
+          window.dispatchEvent(new CustomEvent('gestor_financeiro_set_simulador_view', { detail: { view: 'stresstest' } }));
+        }, 100);
+      }
+    },
+    {
+      id: 'inv-valuation',
+      title: 'Valuation Graham & Teto Bazin',
+      subtitle: 'Cálculo de preço teto, margem de segurança e dividend yield alvo',
+      category: 'Inteligência & IA',
+      icon: '🎯',
+      shortcut: 'V',
+      perform: () => {
+        onNavigate('investments');
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('gestor_financeiro_set_investments_tab', { detail: { tab: 'simulador' } }));
+          window.dispatchEvent(new CustomEvent('gestor_financeiro_set_simulador_view', { detail: { view: 'valuation' } }));
+        }, 100);
+      }
+    },
+    {
+      id: 'inv-dividend-calendar',
+      title: 'Cronograma de Dividendos & Bola de Neve',
+      subtitle: 'Datas COM vs PAG, fluxo projetado 12 meses e reinvestimento autônomo de cotas',
+      category: 'Inteligência & IA',
+      icon: '💰',
+      shortcut: 'D',
+      perform: () => {
+        onNavigate('investments');
+        setTimeout(() => window.dispatchEvent(new CustomEvent('gestor_financeiro_set_investments_tab', { detail: { tab: 'proventos' } })), 100);
+      }
+    },
+    {
+      id: 'inv-risk-matrix',
+      title: 'Matriz de Correlação & Raio-X de Risco',
+      subtitle: 'Coeficiente de Pearson cruzado, concentração setorial e índice de diversificação',
+      category: 'Inteligência & IA',
+      icon: '📉',
+      perform: () => {
+        onNavigate('investments');
+        setTimeout(() => window.dispatchEvent(new CustomEvent('gestor_financeiro_set_investments_tab', { detail: { tab: 'rebalanceamento' } })), 100);
+      }
+    },
+    {
       id: 'leak-radar',
-      title: 'Radar de Recorrências & Vazamentos de Caixa',
-      subtitle: 'Identificar assinaturas ativas, aumento de preços e tarifas bancárias',
+      title: 'Scanner de Assinaturas & Custos Invisíveis',
+      subtitle: 'Identificar aumentos furtivos de mensalidades e tarifas bancárias (CMN 3.919)',
       category: 'Inteligência & IA',
       icon: '🛡️',
       perform: () => {
-        onNavigate('cashflow');
+        onNavigate('financeAccounting');
+        setTimeout(() => window.dispatchEvent(new CustomEvent('gestor_financeiro_set_finance_tab', { detail: { tab: 'cashflow' } })), 100);
+      }
+    },
+    {
+      id: 'ai-dre-audit',
+      title: 'Parecer Contábil de DRE com IA',
+      subtitle: 'Auditoria de margens, EBITDA e diagnóstico fiscal sênior emitido pela IA',
+      category: 'Inteligência & IA',
+      icon: '📑',
+      perform: () => {
+        onNavigate('financeAccounting');
+        setTimeout(() => window.dispatchEvent(new CustomEvent('gestor_financeiro_set_finance_tab', { detail: { tab: 'accounting', accountingTab: 'dre' } })), 100);
       }
     },
     {
@@ -91,23 +195,15 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       }
     },
     {
-      id: 'ai-audit',
-      title: 'Auditar Carteira de Investimentos com IA',
-      subtitle: 'Diagnóstico de risco, concentração e Graham/Bazin',
-      category: 'Inteligência & IA',
-      icon: '🎯',
-      perform: () => {
-        onNavigate('investments');
-        setTimeout(() => window.dispatchEvent(new CustomEvent('open_concierge_chat')), 300);
-      }
-    },
-    {
       id: 'inv-rebalance',
       title: 'Rebalanceamento de Carteira (Smart Rebalancer)',
       subtitle: 'Alocação ideal e cálculo de aportes inteligentes',
       category: 'Ações Rápidas',
       icon: '⚖️',
-      perform: () => onNavigate('investments')
+      perform: () => {
+        onNavigate('investments');
+        setTimeout(() => window.dispatchEvent(new CustomEvent('gestor_financeiro_set_investments_tab', { detail: { tab: 'rebalanceamento' } })), 100);
+      }
     },
     {
       id: 'inv-tax',
@@ -115,7 +211,10 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       subtitle: 'Acompanhar isenção de R$ 20k em Ações e DARF de FIIs',
       category: 'Ações Rápidas',
       icon: '🧾',
-      perform: () => onNavigate('investments')
+      perform: () => {
+        onNavigate('investments');
+        setTimeout(() => window.dispatchEvent(new CustomEvent('gestor_financeiro_set_investments_tab', { detail: { tab: 'fiscal' } })), 100);
+      }
     },
     // Navegação
     {

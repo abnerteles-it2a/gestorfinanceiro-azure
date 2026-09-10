@@ -13,6 +13,20 @@ export const InvestmentSimulator: React.FC = () => {
     const { showToast } = useToast();
 
     const [simulatorView, setSimulatorView] = useState<'valuation' | 'montecarlo' | 'stresstest'>('valuation');
+
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const ce = e as CustomEvent;
+            if (ce?.detail?.view && ['valuation', 'montecarlo', 'stresstest'].includes(ce.detail.view)) {
+                setSimulatorView(ce.detail.view);
+            }
+            if (ce?.detail?.ticker) {
+                setTicker(ce.detail.ticker.toUpperCase());
+            }
+        };
+        window.addEventListener('gestor_financeiro_set_simulador_view', handler as EventListener);
+        return () => window.removeEventListener('gestor_financeiro_set_simulador_view', handler as EventListener);
+    }, []);
     const [ticker, setTicker] = useState('PETR4');
     const [amount, setAmount] = useState<number>(1000);
     const [customPrice, setCustomPrice] = useState<number | ''>('');

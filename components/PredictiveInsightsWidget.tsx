@@ -286,12 +286,22 @@ export const PredictiveInsightsWidget: React.FC = () => {
           )}
 
           {topOpportunity && (
-            <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-2 text-xs text-teal-300">
-              <span className="px-2 py-0.5 rounded-md bg-teal-500/20 text-teal-300 text-[9px] font-black uppercase tracking-wider border border-teal-500/30">
+            <div
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('gestor_financeiro_navigate', { detail: { view: 'investments' } }));
+                setTimeout(() => {
+                  window.dispatchEvent(new CustomEvent('gestor_financeiro_set_investments_tab', { detail: { tab: 'simulador' } }));
+                  window.dispatchEvent(new CustomEvent('gestor_financeiro_set_simulador_view', { detail: { view: 'valuation', ticker: topOpportunity.ticker } }));
+                }, 100);
+              }}
+              title="Clique para abrir o simulador de valuation com este ativo"
+              className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-2 text-xs text-teal-300 cursor-pointer group hover:bg-slate-800/40 p-1.5 rounded-lg transition-colors"
+            >
+              <span className="px-2 py-0.5 rounded-md bg-teal-500/20 text-teal-300 text-[9px] font-black uppercase tracking-wider border border-teal-500/30 group-hover:bg-teal-500/30 transition-all">
                 💡 Oportunidade de Valuation
               </span>
-              <span className="text-[11px] text-slate-300">
-                Ativo <strong>{topOpportunity.ticker}</strong> opera com <strong>+{topOpportunity.discountPct}% de margem</strong> no Teto Bazin ({formatCurrency(topOpportunity.ceiling)}).
+              <span className="text-[11px] text-slate-300 group-hover:text-white transition-colors">
+                Ativo <strong>{topOpportunity.ticker}</strong> opera com <strong>+{topOpportunity.discountPct}% de margem</strong> no Teto Bazin ({formatCurrency(topOpportunity.ceiling)}). <span className="underline decoration-teal-500 text-teal-400 font-bold ml-1">Simular Compra →</span>
               </span>
             </div>
           )}

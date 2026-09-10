@@ -592,6 +592,17 @@ const Investments: React.FC<InvestmentsProps> = ({ onEditInvestment }) => {
     const [forceUpdate, setForceUpdate] = useState(false);
     const [showDetails, setShowDetails] = useState(false);
     const [activeTab, setActiveTab] = useState<InvTab>('carteira');
+
+    React.useEffect(() => {
+        const handler = (e: Event) => {
+            const ce = e as CustomEvent;
+            if (ce?.detail?.tab) {
+                setActiveTab(ce.detail.tab);
+            }
+        };
+        window.addEventListener('gestor_financeiro_set_investments_tab', handler as EventListener);
+        return () => window.removeEventListener('gestor_financeiro_set_investments_tab', handler as EventListener);
+    }, []);
     
     return (
         <div className="space-y-8 animate-in fade-in duration-500 pb-12">

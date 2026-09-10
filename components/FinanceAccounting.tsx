@@ -36,6 +36,23 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
   const [reloadKey, setReloadKey] = React.useState(0);
   const [aiAuditReport, setAiAuditReport] = React.useState<string | null>(null);
   const [isGeneratingAudit, setIsGeneratingAudit] = React.useState(false);
+
+  React.useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent;
+      if (ce?.detail?.tab && ['cashflow', 'obligations', 'accounting'].includes(ce.detail.tab)) {
+        setTab(ce.detail.tab);
+      }
+      if (ce?.detail?.obligationsTab && ['payables', 'receivables'].includes(ce.detail.obligationsTab)) {
+        setObligationsTab(ce.detail.obligationsTab);
+      }
+      if (ce?.detail?.accountingTab && ['dre', 'balanco'].includes(ce.detail.accountingTab)) {
+        setAccountingTab(ce.detail.accountingTab);
+      }
+    };
+    window.addEventListener('gestor_financeiro_set_finance_tab', handler as EventListener);
+    return () => window.removeEventListener('gestor_financeiro_set_finance_tab', handler as EventListener);
+  }, [setTab]);
   const [title, setTitle] = React.useState('');
   const [amount, setAmount] = React.useState('');
   const [dueDate, setDueDate] = React.useState(() => new Date().toISOString().slice(0,10));
