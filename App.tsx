@@ -25,6 +25,7 @@ import { EditTransactionModal } from './components/EditTransactionModal';
 import { EditInvestmentModal } from './components/EditInvestmentModal';
 import { LoaderState } from './components/ui/LoaderState';
 import { WelcomeModal } from './components/WelcomeModal';
+import { CommandPalette } from './components/CommandPalette';
 import { CalendarWidget } from './components/CalendarWidget';
 import { WeatherWidget } from './components/WeatherWidget';
 import type { ModalType, Transaction, AnyInvestment } from './types';
@@ -158,7 +159,7 @@ const SidebarNav: React.FC<{ collapsed: boolean; setCollapsed: (v: boolean) => v
 
 const AppContent: React.FC = () => {
     useSecurity();
-    const { theme } = useTheme();
+    const { theme, toggleTheme } = useTheme();
     const { user, signOut, isAdmin } = useAuth();
     const { showToast } = useToast();
     const { userPreferences, entitlements, capabilities, subscriptionInfo } = useFinancialData();
@@ -372,6 +373,14 @@ const AppContent: React.FC = () => {
         };
         window.addEventListener('gestor_financeiro_navigate', handler as EventListener);
         return () => { window.removeEventListener('gestor_financeiro_navigate', handler as EventListener); };
+    }, []);
+
+    const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+
+    React.useEffect(() => {
+        const handler = () => setIsCommandPaletteOpen(prev => !prev);
+        window.addEventListener('open_command_palette', handler);
+        return () => { window.removeEventListener('open_command_palette', handler); };
     }, []);
 
     return (
@@ -589,6 +598,13 @@ const AppContent: React.FC = () => {
             <WelcomeModal
                 isOpen={showWelcome}
                 onClose={() => setShowWelcome(false)}
+            />
+            <CommandPalette
+                isOpen={isCommandPaletteOpen}
+                onClose={() => setIsCommandPaletteOpen(false)}
+                onNavigate={(view) => handleSetActiveView(view)}
+                toggleTheme={toggleTheme}
+                isDark={theme === 'dark'}
             />
 
             {/* ── SUBSCRIPTION BLOCK OVERLAY ── */}
