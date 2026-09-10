@@ -3,8 +3,10 @@ import { useFinancialData } from '../context/FinancialDataContext';
 import { TransactionType } from '../types';
 import type { Transaction } from '../types';
 import { Modal } from './shared/Modal';
-import { recordCategoryPreference, recordAccountPreference, recordPaymentPreference } from '../services/marketDataService';
+import { recordCategoryPreference, recordAccountPreference, recordPaymentPreference, parseTransactionFromText } from '../services/marketDataService';
 import { toIsoLocalDate, dateKey, formatInputMoney, toNumberPtBr, formatCurrencyForInput } from '../utils/formatters';
+import { VoiceRecordButton } from './ui/VoiceRecordButton';
+import { SparklesIcon } from './icons';
 
 interface EditTransactionModalProps {
     isOpen: boolean;
@@ -27,6 +29,7 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({ isOp
     const [costCenterId, setCostCenterId] = useState<string>(transaction.costCenterId || (costCenters[0]?.id || ''));
     const [isBusinessRevenue, setIsBusinessRevenue] = useState(!!transaction.isBusinessRevenue);
     const [isBusinessExpense, setIsBusinessExpense] = useState(!!transaction.isBusinessExpense);
+    const [isVoiceProcessing, setIsVoiceProcessing] = useState(false);
 
     const availableCategories = categories.filter(c => c.type === transactionType || transactionType === TransactionType.TRANSFER);
 
@@ -42,6 +45,66 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({ isOp
         setIsBusinessRevenue(!!transaction.isBusinessRevenue);
         setIsBusinessExpense(!!transaction.isBusinessExpense);
     }, [transaction, isOpen]);
+
+    const handleVoiceEdit = async (speechText: string) => {
+        if (!speechText || speechText.trim().length < 2) return;
+        setIsVoiceProcessing(true);
+        try {
+            const categoryNames = categories.map(c => c.name);
+            const accountList = accounts.map(a => ({ id: a.id, name: a.name }));
+            const costCenterList = costCenters.map(c => ({ id: c.id, name: c.name }));
+
+            const res = await fetch('/api/ai/advice', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    kind: 'transaction',
+                    context: {
+                        text: speechText,
+                        today: new Date().toISOString().split('T')[0],
+                        categories: categoryNames,
+                        accounts: accountList,
+                        costCenters: costCenterList
+                    }
+                })
+            });
+
+            let tx: any = null;
+            if (res.ok) {
+                const data = await res.json();
+                tx = data?.transaction;
+            }
+            if (!tx) {
+                const local = await parseTransactionFromText(speechText, categoryNames, accountList);
+                if (local) {
+                    tx = {
+                        type: local.type,
+                        amount: local.amount,
+                        description: local.description,
+                        date: local.date,
+                        category: local.category
+                    };
+                }
+            }
+            if (tx) {
+                if (tx.type === 'Entrada') setTransactionType(TransactionType.INCOME);
+                else if (tx.type === 'Saída') setTransactionType(TransactionType.EXPENSE);
+                else if (tx.type === 'Transferência') setTransactionType(TransactionType.TRANSFER);
+                if (tx.amount) setAmount(formatCurrencyForInput(tx.amount));
+                if (tx.description) setDescription(tx.description);
+                if (tx.date) setDate(tx.date);
+                if (tx.category) setCategory(tx.category);
+                if (tx.paymentMethod) setPaymentMethod(tx.paymentMethod);
+                if (tx.accountId) setAccountId(tx.accountId);
+                if (tx.toAccountId) setToAccountId(tx.toAccountId);
+                if (tx.costCenterId) setCostCenterId(tx.costCenterId);
+            }
+        } catch (e) {
+            console.error('Voice edit error:', e);
+        } finally {
+            setIsVoiceProcessing(false);
+        }
+    };
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -80,6 +143,24 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({ isOp
     return (
         <Modal isOpen={isOpen} onClose={onClose} title="Editar Lançamento" footer={footer}>
             <form id="edit-transaction-form" onSubmit={handleSubmit} className="space-y-4">
+                {/* Lançamento / Edição por Voz */}
+                <div className="flex items-center justify-between bg-indigo-50/70 dark:bg-indigo-950/30 p-2.5 rounded-xl border border-indigo-200/60 dark:border-indigo-800/40">
+                    <div className="flex items-center gap-2">
+                        <SparklesIcon className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                            Ajuste Rápido por Voz
+                        </span>
+                        <span className="hidden sm:inline text-[11px] text-slate-500 dark:text-slate-400">
+                            (ex: "Mudar para 60 reais no débito")
+                        </span>
+                    </div>
+                    <VoiceRecordButton
+                        onSpeechResult={handleVoiceEdit}
+                        isProcessing={isVoiceProcessing}
+                        label="Ditar Alteração"
+                        size="sm"
+                    />
+                </div>
                  <div className="grid grid-cols-3 gap-2 bg-gray-200 dark:bg-gray-700 p-1 rounded-lg">
                     {Object.values(TransactionType).map(t => (
                         <button

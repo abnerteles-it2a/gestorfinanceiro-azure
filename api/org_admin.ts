@@ -91,12 +91,12 @@ export default async function handler(req: any, res: any) {
 
                 // Check seat limit
                 const orgRes = await getPool().query('SELECT seats FROM public.organizations WHERE id=$1', [orgId]);
-                let seats = orgRes.rows[0]?.seats || 1;
+                let seats = orgRes.rows[0]?.seats || 2;
                 
-                // Strict Block: Trial Pro only allows 1 user
+                // Trial Pro allows 2 seats to evaluate multi-user collaboration
                 const subRes = await getPool().query('SELECT billing_period FROM public.org_subscriptions WHERE org_id=$1', [orgId]);
                 if (subRes.rows[0]?.billing_period === 'trial') {
-                    seats = 1;
+                    seats = Math.max(seats, 2);
                 }
 
                 const membersCountRes = await getPool().query('SELECT count(*) as count FROM public.org_members WHERE org_id=$1', [orgId]);
@@ -154,13 +154,13 @@ export default async function handler(req: any, res: any) {
 
                 // Check seat limit
                 const orgRes = await getPool().query('SELECT seats, plan_id FROM public.organizations WHERE id=$1', [orgId]);
-                let seats = orgRes.rows[0]?.seats || 1;
+                let seats = orgRes.rows[0]?.seats || 2;
                 const orgPlanId = orgRes.rows[0]?.plan_id;
                 
-                // Strict Block: Trial Pro only allows 1 user
+                // Trial Pro allows 2 seats to evaluate multi-user collaboration
                 const subRes = await getPool().query('SELECT billing_period FROM public.org_subscriptions WHERE org_id=$1', [orgId]);
                 if (subRes.rows[0]?.billing_period === 'trial') {
-                    seats = 1;
+                    seats = Math.max(seats, 2);
                 }
 
                 const membersCountRes = await getPool().query('SELECT count(*) as count FROM public.org_members WHERE org_id=$1', [orgId]);
@@ -168,7 +168,7 @@ export default async function handler(req: any, res: any) {
 
                 if (currentMembers >= seats) {
                     res.statusCode = 403;
-                    res.end(JSON.stringify({ error: subRes.rows[0]?.billing_period === 'trial' ? 'A criação de novos usuários corporativos só é liberada após a assinatura efetiva do plano Pro.' : 'Seat limit reached' }));
+                    res.end(JSON.stringify({ error: `Limite de assentos atingido (${currentMembers}/${seats}). Faça upgrade do plano para adicionar mais membros.` }));
                     return;
                 }
 

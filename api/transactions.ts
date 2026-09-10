@@ -2,23 +2,7 @@ import { Pool } from 'pg';
 import { jwtVerify } from 'jose';
 import { verifySession } from './_auth_shared';
 
-let pool: Pool | null = null;
-
-const getPool = () => {
-  if (!pool) {
-    const rawConnectionString = process.env.NEON_DATABASE_URL || process.env.DATABASE_URL;
-    const connectionString = rawConnectionString ? rawConnectionString.replace('?sslmode=require', '') : rawConnectionString;
-    pool = new Pool({ 
-      connectionString,
-      ssl: { rejectUnauthorized: false }
-    });
-    // Ensure UTF-8 encoding for all connections
-    pool.on('connect', (client) => {
-      client.query('SET client_encoding = "UTF8"').catch(e => console.error('Failed to set client_encoding:', e));
-    });
-  }
-  return pool;
-};
+import { getPool } from './_db';
 
 
 export default async function handler(req: any, res: any) {
@@ -77,6 +61,12 @@ export default async function handler(req: any, res: any) {
             return;
         }
 
+        if (transaction_type === 'Transferência' && !to_account_id) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'missing_to_account_id', message: 'Conta de destino é obrigatória para transferências.' }));
+            return;
+        }
+
         // Permission Check for Cost Center
         if (orgId && role === 'member' && cost_center_id) {
             const permRes = await db.query('select role from public.cost_center_permissions where user_id=$1 and cost_center_id=$2', [userId, cost_center_id]);
@@ -119,22 +109,18 @@ export default async function handler(req: any, res: any) {
 
         // Check Edit Access
         let canEdit = false;
-        if (tx.user_id === userId) canEdit = true; // Creator
-        if (role === 'admin' || role === 'owner') {
-            // Admin can edit if tx belongs to org
-            if (orgId) {
-                 const memberCheck = await db.query('select 1 from public.org_members where org_id=$1 and user_id=$2', [orgId, tx.user_id]);
-                 if (memberCheck.rows.length > 0) canEdit = true;
+        if (targetOrgId) {
+            if (tx.org_id === targetOrgId) {
+                if (tx.user_id === userId) canEdit = true;
+                if (role === 'admin' || role === 'owner') canEdit = true;
+                if (!canEdit && role === 'member' && tx.cost_center_id) {
+                    const permRes = await db.query('select role from public.cost_center_permissions where user_id=$1 and cost_center_id=$2', [userId, tx.cost_center_id]);
+                    const perm = permRes.rows[0]?.role;
+                    if (perm === 'editor' || perm === 'manager') canEdit = true;
+                }
             }
-        }
-
-        if (!canEdit && orgId && role === 'member') {
-             // Check CC permissions
-             if (tx.cost_center_id) {
-                 const permRes = await db.query('select role from public.cost_center_permissions where user_id=$1 and cost_center_id=$2', [userId, tx.cost_center_id]);
-                 const perm = permRes.rows[0]?.role;
-                 if (perm === 'editor' || perm === 'manager') canEdit = true;
-             }
+        } else {
+            if (tx.user_id === userId && !tx.org_id) canEdit = true;
         }
 
         if (!canEdit) {
@@ -158,12 +144,21 @@ export default async function handler(req: any, res: any) {
 
         const { description, amount, transaction_type, account_id, to_account_id, category, date, payment_method, cost_center_id } = bodyInput;
         
-        await db.query(
-            `UPDATE public.transactions 
-             SET description=$1, amount=$2, transaction_type=$3, account_id=$4, to_account_id=$5, category=$6, date=$7, payment_method=$8, cost_center_id=$9
-             WHERE id=$10 and (org_id=$11 or user_id=$12)`,
-            [description, amount, transaction_type, account_id, to_account_id || null, category, date, payment_method, cost_center_id || null, id, targetOrgId, userId]
-        );
+        if (targetOrgId) {
+            await db.query(
+                `UPDATE public.transactions 
+                 SET description=$1, amount=$2, transaction_type=$3, account_id=$4, to_account_id=$5, category=$6, date=$7, payment_method=$8, cost_center_id=$9
+                 WHERE id=$10 and org_id=$11`,
+                [description, amount, transaction_type, account_id, to_account_id || null, category, date, payment_method, cost_center_id || null, id, targetOrgId]
+            );
+        } else {
+            await db.query(
+                `UPDATE public.transactions 
+                 SET description=$1, amount=$2, transaction_type=$3, account_id=$4, to_account_id=$5, category=$6, date=$7, payment_method=$8, cost_center_id=$9
+                 WHERE id=$10 and user_id=$11 and org_id is null`,
+                [description, amount, transaction_type, account_id, to_account_id || null, category, date, payment_method, cost_center_id || null, id, userId]
+            );
+        }
 
         res.statusCode = 200;
         res.end(JSON.stringify({ success: true }));
@@ -183,24 +178,18 @@ export default async function handler(req: any, res: any) {
         if (!tx) { res.statusCode = 404; res.end(JSON.stringify({ error: 'not_found' })); return; }
 
         let canDelete = false;
-        if (tx.user_id === userId) canDelete = true;
-        if (role === 'admin' || role === 'owner') {
-             if (orgId) {
-                 const memberCheck = await db.query('select 1 from public.org_members where org_id=$1 and user_id=$2', [orgId, tx.user_id]);
-                 if (memberCheck.rows.length > 0) canDelete = true;
+        if (targetOrgId) {
+            if (tx.org_id === targetOrgId) {
+                if (tx.user_id === userId) canDelete = true;
+                if (role === 'admin' || role === 'owner') canDelete = true;
+                if (!canDelete && role === 'member' && tx.cost_center_id) {
+                    const permRes = await db.query('select role from public.cost_center_permissions where user_id=$1 and cost_center_id=$2', [userId, tx.cost_center_id]);
+                    const perm = permRes.rows[0]?.role;
+                    if (perm === 'manager' || perm === 'editor') canDelete = true;
+                }
             }
-        }
-        
-        // Members usually can't delete unless they are creators, or maybe Manager of CC?
-        // Let's assume Manager of CC can delete.
-        if (!canDelete && orgId && role === 'member') {
-             if (tx.cost_center_id) {
-                 const permRes = await db.query('select role from public.cost_center_permissions where user_id=$1 and cost_center_id=$2', [userId, tx.cost_center_id]);
-                 const perm = permRes.rows[0]?.role;
-                 if (perm === 'manager') canDelete = true; // Only manager can delete? Or editor too? Usually delete is stricter.
-                 // Let's allow editor to delete for now to match "edits cost center W"
-                 if (perm === 'editor') canDelete = true;
-             }
+        } else {
+            if (tx.user_id === userId && !tx.org_id) canDelete = true;
         }
 
         if (!canDelete) {

@@ -3,13 +3,13 @@ import { useFinancialData } from '../context/FinancialDataContext';
 import { TransactionType } from '../types';
 import type { Transaction } from '../types';
 import { formatCurrency, formatDate, dateKey } from '../utils/formatters';
+import { isIncomeTx, isExpenseTx } from '../utils/transactionHelpers';
 import { ArrowDownIcon, ArrowUpIcon, BankIcon, DollarSignIcon, WalletIcon, TrendingUpIcon, AlertTriangleIcon, TrophyIcon } from './icons';
 import { Modal } from './shared/Modal';
 import { GoalsWidget } from './GoalsWidget';
 import { MeiMonitoringWidget } from './MeiMonitoringWidget';
 import { PayablesList } from './PayablesList';
 import { ReceivablesList } from './ReceivablesList';
-import { MonthlyBalance } from './MonthlyBalance';
 import { CashFlowWidget } from './CashFlowWidget';
 import { TransactionItem } from './TransactionItem';
 import { FinancialProgressionChart } from './FinancialProgressionChart';
@@ -73,7 +73,7 @@ const Dashboard: React.FC = () => {
             return t.category === categoryName && 
                    d.getMonth() === currentMonth && 
                    d.getFullYear() === currentYear &&
-                   t.transactionType === TransactionType.EXPENSE;
+                   isExpenseTx(t.transactionType);
          });
          
          setChartDetails({
@@ -186,17 +186,17 @@ const Dashboard: React.FC = () => {
             
             // Current Month Logic
             if (tMonth === currentMonth && tYear === currentYear) {
-                if (t.transactionType === TransactionType.INCOME) {
+                if (isIncomeTx(t.transactionType)) {
                     income += t.amount;
-                } else if (t.transactionType === TransactionType.EXPENSE) {
+                } else if (isExpenseTx(t.transactionType)) {
                     expense += t.amount;
                     expenseByCategory[t.category] = (expenseByCategory[t.category] || 0) + t.amount;
                 }
             } 
             // Previous Month Logic
             else if (tMonth === previousMonth && tYear === previousYear) {
-                 if (t.transactionType === TransactionType.INCOME) prevIncome += t.amount;
-                 if (t.transactionType === TransactionType.EXPENSE) prevExpense += t.amount;
+                 if (isIncomeTx(t.transactionType)) prevIncome += t.amount;
+                 if (isExpenseTx(t.transactionType)) prevExpense += t.amount;
             }
         });
 
@@ -255,20 +255,20 @@ const Dashboard: React.FC = () => {
                 : 'grid grid-cols-1 gap-6';
     
     return (
-        <div className="space-y-8 animate-fade-in pb-8">
-            <div className="flex items-end justify-between mb-8">
-                <div className="flex flex-col gap-1">
-                    <h1 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Dashboard Executivo</h1>
-                    <h2 className="text-2xl font-black text-[#020617] dark:text-white tracking-tight">Visão Geral</h2>
+        <div className="space-y-5 lg:space-y-6 animate-fade-in pb-6">
+            <div className="flex items-end justify-between mb-4 lg:mb-5">
+                <div className="flex flex-col gap-0.5">
+                    <h1 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Dashboard Executivo</h1>
+                    <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">Visão Geral</h2>
                 </div>
             </div>
 
             {/* Section: Overview Principal */}
             <section aria-labelledby="overview-title">
-                <div className="flex items-center justify-between mb-6">
-                    <h2 id="overview-title" className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Visão Geral de Patrimônio</h2>
+                <div className="flex items-center justify-between mb-3 sm:mb-4">
+                    <h2 id="overview-title" className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Visão Geral de Patrimônio</h2>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-4 min-[2200px]:grid-cols-8 gap-3 sm:gap-4">
                     <KpiCard 
                         title="Patrimônio Líquido" 
                         value={formatCurrency(netWorth)} 
@@ -436,15 +436,15 @@ const Dashboard: React.FC = () => {
                     </div>
 
                     {/* Camada 2: Patrimônio e Evolução */}
-                    <div className="space-y-6">
+                    <div className="space-y-4 lg:space-y-5">
                         {/* Status de Patrimônio (3 Cards Independentes) */}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-5">
                             <AccountBalancesWidget accounts={accounts} />
                             <InvestmentSummary />
                             <DocsCountCard count={docsCount} bytes={docsBytes} scope={viewMode === 'organization' ? 'org' : 'personal'} />
                         </div>
 
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-5">
                             <MonthlyEvolutionChart onMonthSelect={handleMonthSelect} />
                             <FinancialProgressionChart onDateSelect={handleDateSelect} />
                         </div>
@@ -461,25 +461,11 @@ const Dashboard: React.FC = () => {
 
                     {/* Camada 3: Atividade e Planejamento */}
                     <div className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-5">
                             <RecentTransactionsWidget transactions={transactions} categories={categories} />
                             <GoalsWidget />
                         </div>
                     </div>
-                </div>
-            </section>
-
-            {/* Section: Planejamento e Outros Widgets (Hollow Style) */}
-            <section aria-labelledby="planning-title">
-                <div className="flex items-center justify-between mb-5 px-1">
-                    <div className="flex flex-col gap-1">
-                        <h2 id="planning-title" className="text-label-caps !text-slate-400">Análise de Rendimento</h2>
-                        <p className="text-[10px] text-slate-500 font-medium uppercase tracking-widest">Balanço e Performance Semanal</p>
-                    </div>
-                </div>
-                <div className="space-y-8">
-                    {/* Camada 1: Balanço Macro Mensal */}
-                    <MonthlyBalance cardsOnly />
                 </div>
             </section>
 

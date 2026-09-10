@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useFinancialData } from '../context/FinancialDataContext';
 import { TransactionType } from '../types';
 import { formatCurrency } from '../utils/formatters';
+import { isIncomeTx, isExpenseTx } from '../utils/transactionHelpers';
 
 const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 
@@ -50,8 +51,8 @@ export const MonthlyBalance: React.FC<{ cardsOnly?: boolean }> = ({ cardsOnly })
     for (const t of rows) {
       const d = (t.date || '').slice(0,10);
       if (!byDay[d]) byDay[d] = { income: 0, expense: 0 };
-      if (t.transactionType === TransactionType.INCOME) byDay[d].income += Number(t.amount || 0);
-      else if (t.transactionType === TransactionType.EXPENSE) byDay[d].expense += Number(t.amount || 0);
+      if (isIncomeTx(t.transactionType)) byDay[d].income += Number(t.amount || 0);
+      else if (isExpenseTx(t.transactionType)) byDay[d].expense += Number(t.amount || 0);
     }
     const days = Object.keys(byDay).sort();
     let acc = 0;

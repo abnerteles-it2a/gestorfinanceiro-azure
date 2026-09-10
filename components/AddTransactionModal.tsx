@@ -4,7 +4,7 @@ import { useFinancialData } from '../context/FinancialDataContext';
 import { TransactionType } from '../types';
 import type { Transaction } from '../types';
 import { Modal } from './shared/Modal';
-import { suggestCategoryAndType } from '../services/marketDataService';
+import { suggestCategoryAndType, parseTransactionFromText } from '../services/marketDataService';
 import { recordCategoryPreference, recordAccountPreference, recordPaymentPreference } from '../services/marketDataService';
 import { toIsoLocalDate, dateKey, formatInputMoney, formatCurrencyForInput, parseCurrencyInput } from '../utils/formatters';
 import { SparklesIcon, PlusIcon } from './icons';
@@ -13,6 +13,7 @@ import { useToast } from '../context/ToastContext';
 import { FormField } from './ui/Forms/FormField';
 import { Input } from './ui/Forms/Input';
 import { Select } from './ui/Forms/Select';
+import { VoiceRecordButton } from './ui/VoiceRecordButton';
 
 interface AddTransactionModalProps {
     isOpen: boolean;
@@ -152,6 +153,119 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
              showToast("Não consegui sugerir uma categoria.", "error");
         }
         setIsSuggesting(false);
+    };
+
+    const [isVoiceProcessing, setIsVoiceProcessing] = useState(false);
+
+    const handleVoiceTransaction = async (speechText: string) => {
+        if (!speechText || speechText.trim().length < 2) return;
+        setIsVoiceProcessing(true);
+        try {
+            const categoryNames = categories.map(c => c.name);
+            const accountList = accounts.map(a => ({ id: a.id, name: a.name }));
+            const costCenterList = costCenters.map(c => ({ id: c.id, name: c.name }));
+
+            const payload = {
+                kind: 'transaction',
+                context: {
+                    text: speechText,
+                    today: new Date().toISOString().split('T')[0],
+                    categories: categoryNames,
+                    accounts: accountList,
+                    costCenters: costCenterList
+                }
+            };
+
+            const res = await fetch('/api/ai/advice', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            let tx: any = null;
+            if (res.ok) {
+                const data = await res.json();
+                tx = data?.transaction;
+            }
+
+            // Fallback para parser léxico local se a IA não responder
+            if (!tx) {
+                const local = await parseTransactionFromText(speechText, categoryNames, accountList);
+                if (local) {
+                    tx = {
+                        type: local.type,
+                        amount: local.amount,
+                        description: local.description,
+                        date: local.date,
+                        accountId: local.accountId,
+                        paymentMethod: local.paymentMethod,
+                        category: local.category
+                    };
+                }
+            }
+
+            if (tx) {
+                if (tx.type === 'Entrada') setTransactionType(TransactionType.INCOME);
+                else if (tx.type === 'Saída') setTransactionType(TransactionType.EXPENSE);
+                else if (tx.type === 'Transferência') {
+                    setTransactionType(TransactionType.TRANSFER);
+                    if (tx.toAccountId) setToAccountId(tx.toAccountId);
+                }
+
+                if (tx.amount) setAmount(formatCurrencyForInput(tx.amount));
+                if (tx.description) setDescription(tx.description);
+                if (tx.date) setDate(tx.date);
+                if (tx.accountId) setAccountId(tx.accountId);
+                if (tx.paymentMethod) setPaymentMethod(tx.paymentMethod);
+                if (tx.costCenterId) setCostCenterId(tx.costCenterId);
+                if (tx.installments && tx.installments > 1) {
+                    setIsRecurring(true);
+                    setRecurrenceCount(tx.installments);
+                }
+
+                if (tx.category) {
+                    const exists = categories.some(c => c.name.toLowerCase() === tx.category.toLowerCase());
+                    if (!exists && tx.category !== 'Outros' && tx.category !== 'Transferência') {
+                        try {
+                            await addCategory({
+                                name: tx.category,
+                                type: tx.type === 'Entrada' ? 'Entrada' : 'Saída',
+                                icon: ''
+                            });
+                        } catch {}
+                    }
+                    setCategory(tx.category);
+                }
+
+                showToast("Lançamento preenchido por voz com sucesso!", "success");
+                return;
+            }
+            showToast("Não foi possível extrair os dados da fala. Tente novamente.", "error");
+        } catch (err) {
+            console.error("Voice parse error:", err);
+            // Fallback de emergência local
+            try {
+                const categoryNames = categories.map(c => c.name);
+                const accountList = accounts.map(a => ({ id: a.id, name: a.name }));
+                const local = await parseTransactionFromText(speechText, categoryNames, accountList);
+                if (local) {
+                    if (local.type === 'Entrada') setTransactionType(TransactionType.INCOME);
+                    else setTransactionType(TransactionType.EXPENSE);
+                    if (local.amount) setAmount(formatCurrencyForInput(local.amount));
+                    if (local.description) setDescription(local.description);
+                    if (local.date) setDate(local.date);
+                    if (local.accountId) setAccountId(local.accountId);
+                    if (local.category) setCategory(local.category);
+                    showToast("Lançamento preenchido por voz!", "success");
+                    return;
+                }
+            } catch {}
+            showToast("Erro ao processar áudio com IA.", "error");
+            console.error("Voice parse error:", err);
+            showToast("Erro ao processar áudio com IA.", "error");
+        } finally {
+            setIsVoiceProcessing(false);
+        }
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -314,8 +428,27 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                 </div>
             )}
             
-            <form id="add-transaction-form" onSubmit={handleSubmit} className="space-y-8 p-2">
+            <form id="add-transaction-form" onSubmit={handleSubmit} className="space-y-6 p-2">
                 
+                {/* Lançamento por Voz com IA */}
+                <div className="flex items-center justify-between bg-teal-500/5 dark:bg-teal-500/10 p-3 rounded-xl border border-teal-500/20">
+                    <div className="flex flex-col">
+                        <span className="text-xs font-bold text-teal-800 dark:text-teal-300 flex items-center gap-1.5">
+                            <SparklesIcon className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                            Preenchimento Rápido por Voz
+                        </span>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                            Fale o lançamento (ex: "Almoço 45 reais no cartão de débito hoje")
+                        </span>
+                    </div>
+                    <VoiceRecordButton
+                        onSpeechResult={handleVoiceTransaction}
+                        isProcessing={isVoiceProcessing}
+                        label="Ditar Lançamento"
+                        size="sm"
+                    />
+                </div>
+
                 <div className="flex flex-col gap-2">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Natureza da Transação</label>
                     <div className="flex items-center gap-3 bg-slate-50 dark:bg-slate-900/50 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800">

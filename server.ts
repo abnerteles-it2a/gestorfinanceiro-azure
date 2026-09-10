@@ -31,17 +31,16 @@ loadEnv('.env.local');
 
 // Log environment status (safe)
 const checkEnv = (key: string) => process.env[key] ? 'OK' : 'MISSING';
-console.log('--- Environment Check ---');
-console.log('NEON_DATABASE_URL:', checkEnv('NEON_DATABASE_URL'));
-console.log('NEON_AUTH_SECRET:', checkEnv('NEON_AUTH_SECRET'));
-console.log('GOOGLE_CLOUD_PROJECT:', checkEnv('GOOGLE_CLOUD_PROJECT'));
-console.log('GOOGLE_CREDENTIALS_JSON:', checkEnv('GOOGLE_CREDENTIALS_JSON'));
-console.log('VITE_SUPABASE_URL:', checkEnv('VITE_SUPABASE_URL'));
-console.log('SES_REGION:', checkEnv('SES_REGION'));
-console.log('SES_SENDER:', checkEnv('SES_SENDER'));
-console.log('SES_ACCESS_KEY_ID:', checkEnv('SES_ACCESS_KEY_ID'), 'FALLBACK:', checkEnv('ACCESS_KEY_ID'));
-console.log('SES_SECRET_ACCESS_KEY:', checkEnv('SES_SECRET_ACCESS_KEY'), 'FALLBACK:', checkEnv('SECRET_ACCESS_KEY'));
-console.log('-------------------------');
+console.log('--- Azure Cloud-Native Stack Status ---');
+console.log('DATABASE_URL:', checkEnv('DATABASE_URL') === 'OK' || checkEnv('NEON_DATABASE_URL') === 'OK' ? 'OK' : 'MISSING');
+console.log('JWT_SECRET:', checkEnv('JWT_SECRET') === 'OK' || checkEnv('NEON_AUTH_SECRET') === 'OK' ? 'OK' : 'MISSING');
+console.log('AZURE_OPENAI_ENDPOINT:', checkEnv('AZURE_OPENAI_ENDPOINT'));
+console.log('AZURE_OPENAI_DEPLOYMENT_NAME:', checkEnv('AZURE_OPENAI_DEPLOYMENT_NAME'));
+console.log('AZURE_OPENAI_API_KEY:', checkEnv('AZURE_OPENAI_API_KEY'));
+console.log('COMMUNICATION_SERVICES:', checkEnv('COMMUNICATION_SERVICES_CONNECTION_STRING'));
+console.log('AZURE_EMAIL_SENDER:', checkEnv('AZURE_EMAIL_SENDER'));
+console.log('ASAAS_API_KEY:', checkEnv('ASAAS_API_KEY'));
+console.log('---------------------------------------');
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));

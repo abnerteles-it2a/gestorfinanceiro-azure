@@ -1,6 +1,7 @@
 import React from 'react';
 import { useFinancialData } from '../context/FinancialDataContext';
 import { formatCurrency, formatDate } from '../utils/formatters';
+import { isIncomeTx, isExpenseTx, isTransferTx, calculateTransactionEffect, calculateAccountBalances } from '../utils/transactionHelpers';
 import { ListBulletIcon, ArrowUpIcon, ArrowDownIcon, BankIcon, DollarSignIcon, WalletIcon, TrendingUpIcon, AlertTriangleIcon, TrophyIcon, SparklesIcon } from './icons';
 import { KpiCard } from './KpiCard';
 import { StatusTag } from './ui/StatusTag';
@@ -66,7 +67,9 @@ const sumOpen = (rows: Array<{ amount: number; status: string; paid_amount?: num
 
 const Reports: React.FC = () => {
     const fd = useFinancialData() as any;
-    const { transactions, accounts, investments, fixedIncomeInvestments, marketData, isMei, viewMode, userPreferences, organizationInfo, planInfo, categories, meiOpeningDate } = fd;
+    const { transactions, accounts, investments, fixedIncomeInvestments, marketData, isMei, viewMode, userPreferences, organizationInfo, planInfo, categories, meiOpeningDate, subscriptionInfo } = fd;
+    const isTrialActive = !!(subscriptionInfo?.isTrial && !subscriptionInfo?.isExpired);
+    const isStarterLocked = (planInfo?.tier === 'starter') && !isTrialActive;
     const [tab, setTab] = React.useState<ReportTab>('fluxo');
     const [month, setMonth] = React.useState<string>(() => monthKey(new Date()));
     const [payables, setPayables] = React.useState<PayableRow[]>([]);
@@ -149,13 +152,13 @@ const Reports: React.FC = () => {
     const receivablesOpenTotal = React.useMemo(() => sumOpen(receivables), [receivables]);
 
     const monthTx = React.useMemo(() => transactions.filter(t => String(t.date || '').slice(0, 7) === month), [transactions, month]);
-    const monthIncome = React.useMemo(() => monthTx.filter(t => t.transactionType === 'Entrada').reduce((s, t) => s + Number(t.amount || 0), 0), [monthTx]);
-    const monthExpense = React.useMemo(() => monthTx.filter(t => t.transactionType === 'Saída').reduce((s, t) => s + Number(t.amount || 0), 0), [monthTx]);
+    const monthIncome = React.useMemo(() => monthTx.filter(t => isIncomeTx(t.transactionType)).reduce((s, t) => s + Number(t.amount || 0), 0), [monthTx]);
+    const monthExpense = React.useMemo(() => monthTx.filter(t => isExpenseTx(t.transactionType)).reduce((s, t) => s + Number(t.amount || 0), 0), [monthTx]);
     const monthNet = React.useMemo(() => monthIncome - monthExpense, [monthIncome, monthExpense]);
     const expenseByCategory = React.useMemo(() => {
         const map: Record<string, number> = {};
         monthTx.forEach(t => {
-            if (t.transactionType !== 'Saída' || t.isInternal) return;
+            if (!isExpenseTx(t.transactionType) || t.isInternal) return;
             const k = String(t.category || 'Outros');
             map[k] = (map[k] || 0) + Number(t.amount || 0);
         });
@@ -165,7 +168,7 @@ const Reports: React.FC = () => {
     const incomeByCategory = React.useMemo(() => {
         const map: Record<string, number> = {};
         monthTx.forEach(t => {
-            if (t.transactionType !== 'Entrada' || t.isInternal) return;
+            if (!isIncomeTx(t.transactionType) || t.isInternal) return;
             const k = String(t.category || 'Outros');
             map[k] = (map[k] || 0) + Number(t.amount || 0);
         });
@@ -179,8 +182,8 @@ const Reports: React.FC = () => {
             if (t.isInternal) return;
             const k = String(t.category || 'Sem Categoria');
             if (!map[k]) map[k] = { income: 0, expense: 0, count: 0, txs: [] };
-            if (t.transactionType === 'Entrada') map[k].income += Number(t.amount || 0);
-            else if (t.transactionType === 'Saída') map[k].expense += Number(t.amount || 0);
+            if (isIncomeTx(t.transactionType)) map[k].income += Number(t.amount || 0);
+            else if (isExpenseTx(t.transactionType)) map[k].expense += Number(t.amount || 0);
             map[k].count++;
             map[k].txs.push(t);
         });
@@ -233,18 +236,7 @@ const Reports: React.FC = () => {
     }, [expenseByCategory, monthIncome]);
 
     const accountBalances = React.useMemo(() => {
-        const balances: Record<string, number> = {};
-        accounts.forEach(acc => { balances[acc.id] = Number(acc.initialBalance || 0); });
-        [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).forEach(t => {
-            if (balances[t.accountId] === undefined) return;
-            if (t.transactionType === 'Entrada') balances[t.accountId] += Number(t.amount || 0);
-            else if (t.transactionType === 'Saída') balances[t.accountId] -= Number(t.amount || 0);
-            else if (t.transactionType === 'Transferência') {
-                balances[t.accountId] -= Number(t.amount || 0);
-                if (t.toAccountId && balances[t.toAccountId] !== undefined) balances[t.toAccountId] += Number(t.amount || 0);
-            }
-        });
-        return balances;
+        return calculateAccountBalances(accounts, transactions);
     }, [accounts, transactions]);
 
     const totalBalance = React.useMemo(() => Object.values(accountBalances).reduce((s, v) => s + Number(v || 0), 0), [accountBalances]);
@@ -253,25 +245,7 @@ const Reports: React.FC = () => {
     const cashFlowData = React.useMemo(() => {
         if (!startDate || !endDate) return { initial: 0, final: 0, income: 0, expense: 0, variation: 0, rows: [], aggregated: [] };
 
-        const transactionEffect = (transaction: any) => {
-            const amount = Number(transaction.amount || 0);
-            if (selectedAccountId === 'all') {
-                if (transaction.transactionType === 'Entrada') return amount;
-                if (transaction.transactionType === 'Saída') return -amount;
-                return 0;
-            }
-
-            if (transaction.transactionType === 'Transferência') {
-                if (transaction.accountId === selectedAccountId) return -amount;
-                if (transaction.toAccountId === selectedAccountId) return amount;
-                return 0;
-            }
-
-            if (transaction.accountId !== selectedAccountId) return 0;
-            if (transaction.transactionType === 'Entrada') return amount;
-            if (transaction.transactionType === 'Saída') return -amount;
-            return 0;
-        };
+        const transactionEffect = (transaction: any) => calculateTransactionEffect(transaction, selectedAccountId);
 
         const selectedAccounts = selectedAccountId === 'all' ? accounts : accounts.filter(account => account.id === selectedAccountId);
         let runningBalance = selectedAccounts.reduce((sum, account) => sum + Number(account.initialBalance || 0), 0);
@@ -853,7 +827,7 @@ const Reports: React.FC = () => {
             const rowClass = i % 2 === 0 ? 'row-even' : 'row-odd';
             return `<tr class="${rowClass}">
                 <td class="col-date">${new Date(row.date + 'T12:00:00').toLocaleDateString('pt-BR')}</td>
-                <td class="col-desc">${row.description || '—'}${row.transactionType === 'Transferência' ? ' <span class="badge-transfer">Transf.</span>' : ''}</td>
+                <td class="col-desc">${row.description || '—'}${isTransferTx(row.transactionType) ? ' <span class="badge-transfer">Transf.</span>' : ''}</td>
                 <td class="col-cat">${row.category || '—'}<br/><span class="acc-name">${accName}${toAccName ? ` → ${toAccName}` : ''}</span></td>
                 <td class="col-val ${isPositive ? 'positive' : 'negative'}">${isPositive ? '+' : ''}${fc(row.effect)}</td>
                 <td class="col-bal">${fc(row.currentBalance)}</td>
@@ -1231,7 +1205,7 @@ const Reports: React.FC = () => {
                     <td class="col-date">${new Date(String(t.date).slice(0,10) + 'T12:00:00').toLocaleDateString('pt-BR')}</td>
                     <td class="col-desc">${t.description || '—'}</td>
                     <td class="col-type">${t.transactionType}</td>
-                    <td class="col-val ${t.transactionType === 'Entrada' ? 'positive' : 'negative'}">${t.transactionType === 'Entrada' ? '+' : '-'}${fc(Number(t.amount || 0))}</td>
+                    <td class="col-val ${isIncomeTx(t.transactionType) ? 'positive' : 'negative'}">${isIncomeTx(t.transactionType) ? '+' : '-'}${fc(Number(t.amount || 0))}</td>
                 </tr>`).join('');
             return `
             <div class="cat-block">
@@ -1425,7 +1399,7 @@ ${printCatWithDetails ? detailBlocks || '<p style="color:#aaa;font-size:8pt;marg
         );
     };
 
-    const isTabLocked = (planInfo?.tier === 'starter') && (tab === 'ap' || tab === 'ar' || tab === 'dre' || tab === 'balanco' || tab === 'mei');
+    const isTabLocked = isStarterLocked && (tab === 'ap' || tab === 'ar' || tab === 'dre' || tab === 'balanco' || tab === 'mei');
 
     return (
         <div className="ReportsContainer space-y-8 animate-in fade-in duration-700 font-sans pb-10 px-1">
@@ -1643,20 +1617,20 @@ ${printCatWithDetails ? detailBlocks || '<p style="color:#aaa;font-size:8pt;marg
                 <button role="tab" aria-selected={tab === 'fluxo'} aria-controls="report-panel-fluxo" onClick={() => setTab('fluxo')} className={`flex-1 min-w-[120px] px-4 py-2 text-[11px] font-bold uppercase tracking-widest rounded-lg transition-colors ${tab === 'fluxo' ? 'bg-white dark:bg-slate-800 text-indigo-600 shadow-sm ring-1 ring-slate-200/50' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Fluxo</button>
                 <button onClick={() => setTab('categorias')} className={`flex-1 min-w-[120px] px-4 py-2 text-[11px] font-bold uppercase tracking-widest rounded-lg transition-all ${tab === 'categorias' ? 'bg-white dark:bg-slate-800 text-indigo-600 shadow-sm ring-1 ring-slate-200/50' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Categorias</button>
                 <button onClick={() => setTab('ap')} className={`flex-1 min-w-[120px] px-4 py-2 text-[11px] font-bold uppercase tracking-widest rounded-lg transition-all ${tab === 'ap' ? 'bg-white dark:bg-slate-800 text-indigo-600 shadow-sm ring-1 ring-slate-200/50' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
-                    Pagar {planInfo?.tier === 'starter' && '🔒'}
+                    Pagar {isStarterLocked && '🔒'}
                 </button>
                 <button onClick={() => setTab('ar')} className={`flex-1 min-w-[120px] px-4 py-2 text-[11px] font-bold uppercase tracking-widest rounded-lg transition-all ${tab === 'ar' ? 'bg-white dark:bg-slate-800 text-indigo-600 shadow-sm ring-1 ring-slate-200/50' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
-                    Receber {planInfo?.tier === 'starter' && '🔒'}
+                    Receber {isStarterLocked && '🔒'}
                 </button>
                 <button onClick={() => setTab('dre')} className={`flex-1 min-w-[120px] px-4 py-2 text-[11px] font-bold uppercase tracking-widest rounded-lg transition-all ${tab === 'dre' ? 'bg-white dark:bg-slate-800 text-indigo-600 shadow-sm ring-1 ring-slate-200/50' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
-                    DRE {planInfo?.tier === 'starter' && '🔒'}
+                    DRE {isStarterLocked && '🔒'}
                 </button>
                 <button onClick={() => setTab('balanco')} className={`flex-1 min-w-[120px] px-4 py-2 text-[11px] font-bold uppercase tracking-widest rounded-lg transition-all ${tab === 'balanco' ? 'bg-white dark:bg-slate-800 text-indigo-600 shadow-sm ring-1 ring-slate-200/50' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
-                    Balanço {planInfo?.tier === 'starter' && '🔒'}
+                    Balanço {isStarterLocked && '🔒'}
                 </button>
                 {isMei && (
                     <button onClick={() => setTab('mei')} className={`flex-1 min-w-[120px] px-4 py-2 text-[11px] font-bold uppercase tracking-widest rounded-lg transition-all ${tab === 'mei' ? 'bg-white dark:bg-slate-800 text-indigo-600 shadow-sm ring-1 ring-slate-200/50' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
-                        MEI {planInfo?.tier === 'starter' && '🔒'}
+                        MEI {isStarterLocked && '🔒'}
                     </button>
                 )}
             </div>
@@ -1668,7 +1642,7 @@ ${printCatWithDetails ? detailBlocks || '<p style="color:#aaa;font-size:8pt;marg
             )}
 
             {tab === 'ap' && (
-                planInfo?.tier === 'starter' ? (
+                isStarterLocked ? (
                     <UpgradeScreen
                         title="Relatório de Contas a Pagar"
                         description="Visualize análises detalhadas de seus compromissos, custos fixos vs variáveis, projeções de saídas e histórico completo de pagamentos."
@@ -1785,7 +1759,7 @@ ${printCatWithDetails ? detailBlocks || '<p style="color:#aaa;font-size:8pt;marg
             )}
 
             {tab === 'ar' && (
-                planInfo?.tier === 'starter' ? (
+                isStarterLocked ? (
                     <UpgradeScreen
                         title="Relatório de Contas a Receber"
                         description="Acompanhe sua receita recorrente (MRR), inadimplência de clientes, histórico de recebimentos e previsibilidade de caixa."
@@ -1901,7 +1875,7 @@ ${printCatWithDetails ? detailBlocks || '<p style="color:#aaa;font-size:8pt;marg
             )}
 
             {tab === 'dre' && (
-                planInfo?.tier === 'starter' ? (
+                isStarterLocked ? (
                     <UpgradeScreen
                         title="Demonstrativo do Resultado do Exercício (DRE)"
                         description="Analise sua Receita Bruta, EBITDA, Custos (COGS), Despesas Operacionais (OPEX) e Resultado Líquido com margens detalhadas."
@@ -2039,7 +2013,7 @@ ${printCatWithDetails ? detailBlocks || '<p style="color:#aaa;font-size:8pt;marg
             )}
 
             {tab === 'balanco' && (
-                planInfo?.tier === 'starter' ? (
+                isStarterLocked ? (
                     <UpgradeScreen
                         title="Balanço Patrimonial"
                         description="Veja a abertura consolidada de seus Ativos (Bens e Direitos), Passivos (Obrigações), Liquidez (Imediata, Seca e Corrente), Endividamento e Patrimônio Líquido."
@@ -2393,8 +2367,8 @@ ${printCatWithDetails ? detailBlocks || '<p style="color:#aaa;font-size:8pt;marg
                                                             <td className="px-6 py-3 text-slate-500 text-xs tabular-nums">{formatDate(String(t.date).slice(0,10))}</td>
                                                             <td className="px-6 py-3 text-slate-800 dark:text-slate-100 font-medium">{t.description || '—'}</td>
                                                             <td className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">{t.transactionType}</td>
-                                                            <td className={`px-6 py-3 text-right font-bold tabular-nums ${t.transactionType === 'Entrada' ? 'text-emerald-600' : 'text-red-500'}`}>
-                                                                {t.transactionType === 'Entrada' ? '+' : '-'}{formatCurrency(Number(t.amount || 0))}
+                                                            <td className={`px-6 py-3 text-right font-bold tabular-nums ${isIncomeTx(t.transactionType) ? 'text-emerald-600' : 'text-red-500'}`}>
+                                                                {isIncomeTx(t.transactionType) ? '+' : '-'}{formatCurrency(Number(t.amount || 0))}
                                                             </td>
                                                         </tr>
                                                     ))}
@@ -2533,7 +2507,7 @@ ${printCatWithDetails ? detailBlocks || '<p style="color:#aaa;font-size:8pt;marg
                                                 <td className="px-6 py-4 text-slate-500 dark:text-slate-400 font-medium tabular-nums">{formatDate(row.date)}</td>
                                                 <td className="px-6 py-4">
                                                     <div className="text-slate-800 dark:text-slate-100 font-semibold">{row.description || 'Sem descrição'}</div>
-                                                    {row.transactionType === 'Transferência' && (
+                                                    {isTransferTx(row.transactionType) && (
                                                         <div className="text-[9px] uppercase text-indigo-500 font-extrabold tracking-widest mt-0.5">Transferência Interna</div>
                                                     )}
                                                 </td>
@@ -2576,16 +2550,16 @@ ${printCatWithDetails ? detailBlocks || '<p style="color:#aaa;font-size:8pt;marg
             )}
 
             {tab === 'mei' && isMei && (
-                planInfo?.tier === 'starter' ? (
+                isStarterLocked ? (
                     <UpgradeScreen
                         title="Demonstrativo MEI e Declaração DASN"
                         description="Planeje sua Declaração Anual do MEI (DASN-SIMEI), acompanhe o teto de faturamento anual de forma automática e calcule a parcela isenta de IRPF."
                         requiredTier="plus"
                     />
                 ) : (
-                    <div className="space-y-10 focus:outline-none animate-fade-in">
-                        <div className="no-print bg-indigo-50/50 dark:bg-indigo-900/10 p-6 rounded-2xl border border-indigo-100 dark:border-indigo-800/30 shadow-sm">
-                            <h3 className="text-sm font-black text-indigo-900 dark:text-indigo-400 uppercase tracking-widest flex items-center gap-2">
+                    <div className="space-y-4 sm:space-y-5 focus:outline-none animate-fade-in">
+                        <div className="no-print bg-indigo-50/50 dark:bg-indigo-900/10 p-4 sm:p-5 rounded-2xl border border-indigo-100 dark:border-indigo-800/30 shadow-xs">
+                            <h3 className="text-xs sm:text-sm font-black text-indigo-900 dark:text-indigo-400 uppercase tracking-widest flex items-center gap-2">
                                 <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse" />
                                 Base fiscal MEI
                             </h3>
@@ -2597,7 +2571,7 @@ ${printCatWithDetails ? detailBlocks || '<p style="color:#aaa;font-size:8pt;marg
 
                         <MeiMonthlyClosingPanel />
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                             <KpiCard 
                                 title="Receita Anual"
                                 value={formatCurrency(meiFiscal.annualRevenue)}
@@ -2634,7 +2608,7 @@ ${printCatWithDetails ? detailBlocks || '<p style="color:#aaa;font-size:8pt;marg
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
                             <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
                                 <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50">
                                     <h3 className="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest">Guia para DASN-SIMEI (CNPJ)</h3>

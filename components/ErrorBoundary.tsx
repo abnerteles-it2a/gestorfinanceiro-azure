@@ -33,28 +33,50 @@ export class ErrorBoundary extends React.Component<Props, State> {
   public render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900 p-4">
-          <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-xl max-w-2xl w-full border border-red-200 dark:border-red-900">
-            <h1 className="text-2xl font-bold text-red-600 dark:text-red-400 mb-4">
-              Ops! Algo deu errado.
+        <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4 transition-colors">
+          <div className="bg-white/90 dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 p-8 sm:p-10 rounded-2xl shadow-2xl max-w-xl w-full backdrop-blur-xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="w-14 h-14 rounded-2xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-600 dark:text-teal-400 mb-6 shadow-sm">
+              <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+            </div>
+            
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight mb-2">
+              Instabilidade Temporária no Módulo
             </h1>
-            <p className="text-gray-700 dark:text-gray-300 mb-4">
-              Ocorreu um erro inesperado na aplicação. Por favor, tente recarregar a página.
+            <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 leading-relaxed">
+              O Gestor Financeiro detectou uma exceção inesperada neste componente. Seus dados e registros permanecem seguros na nuvem.
             </p>
             
-            <div className="bg-gray-100 dark:bg-black p-4 rounded overflow-auto max-h-64 mb-6 text-sm font-mono">
-              <p className="text-red-500 font-bold mb-2">{this.state.error && this.state.error.toString()}</p>
-              <pre className="text-gray-600 dark:text-gray-400 whitespace-pre-wrap">
-                {this.state.errorInfo && this.state.errorInfo.componentStack}
-              </pre>
-            </div>
+            {this.state.error && (
+              <div className="bg-slate-100/80 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 p-3.5 rounded-xl overflow-auto max-h-36 mb-6 text-xs font-mono text-slate-600 dark:text-slate-400">
+                <p className="text-rose-500 font-bold mb-1">{this.state.error.toString()}</p>
+              </div>
+            )}
 
-            <button
-              onClick={() => window.location.reload()}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded transition-colors"
-            >
-              Recarregar Página
-            </button>
+            <div className="flex flex-col sm:flex-row items-center gap-3">
+              <button
+                onClick={() => window.location.reload()}
+                className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-[#0D9488] hover:bg-[#0f766e] text-white text-sm font-bold shadow-lg shadow-teal-500/20 active:scale-[0.98] transition-all"
+              >
+                Recarregar Sistema
+              </button>
+              <button
+                onClick={() => {
+                  try {
+                    localStorage.removeItem('gestor_financeiro_chat_history');
+                    window.location.href = '/';
+                  } catch {
+                    window.location.reload();
+                  }
+                }}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-sm font-semibold transition-colors"
+              >
+                Retornar ao Início
+              </button>
+            </div>
           </div>
         </div>
       );

@@ -1,26 +1,129 @@
 import { Pool } from 'pg';
 import { jwtVerify } from 'jose';
 import { verifySession } from './_auth_shared';
+import { getPool } from './_db';
 
-let pool: Pool | null = null;
+let isSchemaEnsured = false;
 
-const getPool = () => {
-  const g: any = globalThis as any;
-  if (g.__gf_pg_pool) return g.__gf_pg_pool as Pool;
-  if (pool) return pool;
-  const rawConnectionString = process.env.NEON_DATABASE_URL || process.env.DATABASE_URL;
-  const connectionString = rawConnectionString ? rawConnectionString.replace('?sslmode=require', '') : rawConnectionString;
-  pool = new Pool({
-    connectionString,
-    max: 5,
-    ssl: { rejectUnauthorized: false }
-  });
-  pool.on('connect', (client) => {
-    client.query('SET client_encoding = "UTF8"').catch(e => console.error('Failed to set client_encoding:', e));
-  });
-  g.__gf_pg_pool = pool;
-  return pool;
-};
+async function ensureSchemaOnce(db: Pool) {
+  if (isSchemaEnsured) return;
+  isSchemaEnsured = true;
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS public.auth_users (
+        id uuid PRIMARY KEY,
+        email text UNIQUE NOT NULL,
+        password_hash text NOT NULL,
+        is_admin boolean DEFAULT false,
+        created_at timestamptz DEFAULT now()
+      )
+    `);
+    const columnsAuth = [
+      { name: 'cpf_cnpj', type: 'text' },
+      { name: 'is_admin', type: 'boolean', default: 'false' },
+      { name: 'email_verified', type: 'boolean', default: 'false' },
+      { name: 'verification_code', type: 'text' },
+      { name: 'reset_token', type: 'text' },
+      { name: 'reset_token_expires', type: 'timestamptz' }
+    ];
+    for (const col of columnsAuth) {
+      try {
+        await db.query(`ALTER TABLE public.auth_users ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}${col.default ? ` DEFAULT ${col.default}` : ''}`);
+      } catch {}
+    }
+
+    await db.query('create table if not exists public.accounts (id uuid primary key, user_id uuid not null, name text not null, bank text, initial_balance numeric(14,2) default 0, created_at timestamptz default now())');
+    await db.query('create table if not exists public.categories (id uuid primary key, user_id uuid not null, name text not null, type text, icon text, created_at timestamptz default now())');
+    await db.query('create table if not exists public.transactions (id uuid primary key, user_id uuid not null, date date not null, account_id uuid not null, to_account_id uuid, transaction_type text not null, category text not null, description text, amount numeric(14,2) not null, payment_method text, cost_center_id uuid, created_at timestamptz default now())');
+    await db.query('create table if not exists public.investments (id uuid primary key, user_id uuid not null, type text, ticker text, quantity numeric(14,8), purchase_price numeric(14,2), purchase_date date, created_at timestamptz default now())');
+    await db.query('create table if not exists public.fixed_income_investments (id uuid primary key, user_id uuid not null, name text, issuer text, amount_invested numeric(14,2), yield_rate text, purchase_date date, maturity_date date, created_at timestamptz default now())');
+    await db.query('create table if not exists public.goals (id uuid primary key, user_id uuid not null, name text, target_amount numeric(14,2), current_amount numeric(14,2), color text, created_at timestamptz default now())');
+    await db.query('create table if not exists public.recurrences (id uuid primary key, user_id uuid not null, label text, amount numeric(14,2), category text, account_id uuid, payment_method text, day_of_month integer, business_day_rule text, cost_center_id uuid, active boolean default true, created_at timestamptz default now())');
+    await db.query('create table if not exists public.cost_centers (id uuid primary key, user_id uuid not null, name text, created_at timestamptz default now())');
+    await db.query('create table if not exists public.cost_center_permissions (id uuid primary key default gen_random_uuid(), user_id uuid not null, cost_center_id uuid not null, role text, created_at timestamptz default now())');
+    await db.query('create table if not exists public.org_invites (id uuid primary key default gen_random_uuid(), org_id uuid not null, email text not null, role text not null, code text unique not null, expires_at timestamptz not null, created_at timestamptz default now())');
+
+    await db.query(`create table if not exists public.user_subscriptions (
+      id uuid primary key default gen_random_uuid(), 
+      user_id uuid not null, 
+      provider text, 
+      status text, 
+      asaas_payment_id text,
+      asaas_subscription_id text,
+      period_start timestamptz, 
+      period_end timestamptz, 
+      created_at timestamptz default now()
+    )`);
+    await db.query(`create table if not exists public.org_subscriptions (
+      org_id uuid primary key, 
+      provider text, 
+      status text, 
+      asaas_payment_id text,
+      asaas_subscription_id text,
+      period_start timestamptz, 
+      period_end timestamptz, 
+      created_at timestamptz default now()
+    )`);
+
+    const subCols = [
+      'created_at timestamptz default now()',
+      'asaas_payment_id text',
+      'asaas_subscription_id text',
+      'billing_period text',
+      'requested_tier text'
+    ];
+    for (const colDef of subCols) {
+      try { await db.query(`alter table public.user_subscriptions add column if not exists ${colDef}`); } catch {}
+      try { await db.query(`alter table public.org_subscriptions add column if not exists ${colDef}`); } catch {}
+    }
+
+    try { await db.query('alter table public.transactions add column if not exists is_business_revenue boolean default false'); } catch {}
+    try { await db.query('alter table public.transactions add column if not exists is_business_expense boolean default false'); } catch {}
+    try { await db.query('alter table public.transactions add column if not exists org_id uuid'); } catch {}
+    try { await db.query('alter table public.accounts add column if not exists org_id uuid'); } catch {}
+    try { await db.query('alter table public.categories add column if not exists mei_category text'); } catch {}
+    try { await db.query('alter table public.categories add column if not exists org_id uuid'); } catch {}
+    try { await db.query('alter table public.investments add column if not exists org_id uuid'); } catch {}
+    try { await db.query('alter table public.fixed_income_investments add column if not exists org_id uuid'); } catch {}
+    try { await db.query('alter table public.goals add column if not exists org_id uuid'); } catch {}
+    try { await db.query('alter table public.recurrences add column if not exists org_id uuid'); } catch {}
+    try { await db.query('alter table public.cost_centers add column if not exists org_id uuid'); } catch {}
+
+    await db.query(`create table if not exists public.profiles (user_id uuid primary key, org_id uuid, plan_id uuid, is_admin boolean default false, preferences jsonb default '{}', created_at timestamptz default now())`);
+    const profileCols = [
+      'is_admin boolean default false',
+      'preferences jsonb default \'{}\'',
+      'full_name text',
+      'document text',
+      'business_profile text',
+      'asaas_customer_id text',
+      'created_at timestamptz default now()'
+    ];
+    for (const colDef of profileCols) {
+      try { await db.query(`alter table public.profiles add column if not exists ${colDef}`); } catch {}
+    }
+    
+    await db.query(`create table if not exists public.organizations (id uuid primary key, name text, seats int, plan_id uuid, created_at timestamptz default now())`);
+    await db.query(`create table if not exists public.plans (id uuid primary key, name text, tier text, created_at timestamptz default now())`);
+
+    // High-performance query indexes
+    const indexes = [
+      'CREATE INDEX IF NOT EXISTS idx_tx_user_date ON public.transactions(user_id, date DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_tx_acc ON public.transactions(account_id)',
+      'CREATE INDEX IF NOT EXISTS idx_tx_to_acc ON public.transactions(to_account_id)',
+      'CREATE INDEX IF NOT EXISTS idx_tx_org_date ON public.transactions(org_id, date DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_sessions_user_jti ON public.auth_sessions(user_id, jti)',
+      'CREATE INDEX IF NOT EXISTS idx_payables_user_status ON public.payables(user_id, status)',
+      'CREATE INDEX IF NOT EXISTS idx_receivables_user_status ON public.receivables(user_id, status)',
+      'CREATE INDEX IF NOT EXISTS idx_usage_ledger ON public.usage_tx_ledger(scope_type, scope_id, yyyymm)'
+    ];
+    for (const idxSql of indexes) {
+      try { await db.query(idxSql); } catch {}
+    }
+  } catch (err: any) {
+    console.warn('Bootstrap: ensureSchemaOnce non-fatal warning:', err?.message);
+  }
+}
 
 const isNoDb = (): boolean => !process.env.NEON_DATABASE_URL && !process.env.DATABASE_URL;
 
@@ -45,141 +148,8 @@ export default async function handler(req: any, res: any) {
     const db = getPool();
     try { await db.query('select 1'); } catch (e: any) { res.statusCode = 500; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ error: e?.message || 'db_unavailable' })); return; }
     
-      // Ensure Core Auth Tables
-      try {
-        await db.query(`
-          CREATE TABLE IF NOT EXISTS public.auth_users (
-            id uuid PRIMARY KEY,
-            email text UNIQUE NOT NULL,
-            password_hash text NOT NULL,
-            is_admin boolean DEFAULT false,
-            created_at timestamptz DEFAULT now()
-          )
-        `);
-        const columnsAuth = [
-          { name: 'cpf_cnpj', type: 'text' },
-          { name: 'is_admin', type: 'boolean', default: 'false' },
-          { name: 'email_verified', type: 'boolean', default: 'false' },
-          { name: 'verification_code', type: 'text' },
-          { name: 'reset_token', type: 'text' },
-          { name: 'reset_token_expires', type: 'timestamptz' }
-        ];
-        for (const col of columnsAuth) {
-          try {
-            await db.query(`ALTER TABLE public.auth_users ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}${col.default ? ` DEFAULT ${col.default}` : ''}`);
-          } catch (err: any) {
-            console.warn(`Bootstrap: Failed to add column ${col.name} to auth_users:`, err.message);
-          }
-        }
-      } catch (e: any) {
-        console.error('Bootstrap: auth_users creation/update failed:', e.message);
-      }
-
-      // Ensure Core Entity Tables
-      try {
-        await db.query('create table if not exists public.accounts (id uuid primary key, user_id uuid not null, name text not null, bank text, initial_balance numeric(14,2) default 0, created_at timestamptz default now())');
-        await db.query('create table if not exists public.categories (id uuid primary key, user_id uuid not null, name text not null, type text, icon text, created_at timestamptz default now())');
-        await db.query('create table if not exists public.transactions (id uuid primary key, user_id uuid not null, date date not null, account_id uuid not null, to_account_id uuid, transaction_type text not null, category text not null, description text, amount numeric(14,2) not null, payment_method text, cost_center_id uuid, created_at timestamptz default now())');
-        await db.query('create table if not exists public.investments (id uuid primary key, user_id uuid not null, type text, ticker text, quantity numeric(14,8), purchase_price numeric(14,2), purchase_date date, created_at timestamptz default now())');
-        await db.query('create table if not exists public.fixed_income_investments (id uuid primary key, user_id uuid not null, name text, issuer text, amount_invested numeric(14,2), yield_rate text, purchase_date date, maturity_date date, created_at timestamptz default now())');
-        await db.query('create table if not exists public.goals (id uuid primary key, user_id uuid not null, name text, target_amount numeric(14,2), current_amount numeric(14,2), color text, created_at timestamptz default now())');
-        await db.query('create table if not exists public.recurrences (id uuid primary key, user_id uuid not null, label text, amount numeric(14,2), category text, account_id uuid, payment_method text, day_of_month integer, business_day_rule text, cost_center_id uuid, active boolean default true, created_at timestamptz default now())');
-        await db.query('create table if not exists public.cost_centers (id uuid primary key, user_id uuid not null, name text, created_at timestamptz default now())');
-        await db.query('create table if not exists public.cost_center_permissions (id uuid primary key default gen_random_uuid(), user_id uuid not null, cost_center_id uuid not null, role text, created_at timestamptz default now())');
-        await db.query('create table if not exists public.org_invites (id uuid primary key default gen_random_uuid(), org_id uuid not null, email text not null, role text not null, code text unique not null, expires_at timestamptz not null, created_at timestamptz default now())');
-      } catch (e: any) {
-        console.error('Bootstrap: entity tables creation failed:', e.message);
-      }
-
-      // Ensure Subscriptions
-      try {
-        await db.query(`create table if not exists public.user_subscriptions (
-          id uuid primary key default gen_random_uuid(), 
-          user_id uuid not null, 
-          provider text, 
-          status text, 
-          asaas_payment_id text,
-          asaas_subscription_id text,
-          period_start timestamptz, 
-          period_end timestamptz, 
-          created_at timestamptz default now()
-        )`);
-        await db.query(`create table if not exists public.org_subscriptions (
-          org_id uuid primary key, 
-          provider text, 
-          status text, 
-          asaas_payment_id text,
-          asaas_subscription_id text,
-          period_start timestamptz, 
-          period_end timestamptz, 
-          created_at timestamptz default now()
-        )`);
-
-        const subCols = [
-          'created_at timestamptz default now()',
-          'asaas_payment_id text',
-          'asaas_subscription_id text',
-          'billing_period text',
-          'requested_tier text'
-        ];
-        for (const colDef of subCols) {
-          const colName = colDef.split(' ')[0];
-          try { await db.query(`alter table public.user_subscriptions add column if not exists ${colDef}`); } catch {}
-          try { await db.query(`alter table public.org_subscriptions add column if not exists ${colDef}`); } catch {}
-        }
-        try { await db.query('alter table public.org_subscriptions add column if not exists pending_payment_id text'); } catch {}
-        try { await db.query('alter table public.org_subscriptions add column if not exists pending_billing_period text'); } catch {}
-        try { await db.query('alter table public.org_subscriptions add column if not exists pending_requested_tier text'); } catch {}
-        try { await db.query('alter table public.org_subscriptions add column if not exists pending_period_start timestamptz'); } catch {}
-        try { await db.query('alter table public.org_subscriptions add column if not exists pending_period_end timestamptz'); } catch {}
-      } catch (e: any) {
-        console.error('Bootstrap: subscriptions tables sync failed:', e.message);
-      }
-
-      // Ensure Table Updates (Entity Extensions)
-      try {
-        try { await db.query('alter table public.transactions add column if not exists is_business_revenue boolean default false'); } catch {}
-        try { await db.query('alter table public.transactions add column if not exists is_business_expense boolean default false'); } catch {}
-        try { await db.query('alter table public.transactions add column if not exists org_id uuid'); } catch {}
-        try { await db.query('alter table public.accounts add column if not exists org_id uuid'); } catch {}
-        try { await db.query('alter table public.categories add column if not exists mei_category text'); } catch {}
-        try { await db.query('alter table public.categories add column if not exists org_id uuid'); } catch {}
-        try { await db.query('alter table public.investments add column if not exists org_id uuid'); } catch {}
-        try { await db.query('alter table public.fixed_income_investments add column if not exists org_id uuid'); } catch {}
-        try { await db.query('alter table public.goals add column if not exists org_id uuid'); } catch {}
-        try { await db.query('alter table public.recurrences add column if not exists org_id uuid'); } catch {}
-        try { await db.query('alter table public.cost_centers add column if not exists org_id uuid'); } catch {}
-      } catch (e: any) {
-         console.warn('Bootstrap: general entity column update warning:', e.message);
-      }
-      
-      // Ensure Profiles & Organizations
-      try {
-        await db.query(`create table if not exists public.profiles (user_id uuid primary key, org_id uuid, plan_id uuid, is_admin boolean default false, preferences jsonb default '{}', created_at timestamptz default now())`);
-        const profileCols = [
-          'is_admin boolean default false',
-          'preferences jsonb default \'{}\'',
-          'full_name text',
-          'document text',
-          'business_profile text',
-          'asaas_customer_id text',
-          'created_at timestamptz default now()'
-        ];
-        for (const colDef of profileCols) {
-          try { await db.query(`alter table public.profiles add column if not exists ${colDef}`); } catch {}
-        }
-        
-        await db.query(`create table if not exists public.organizations (id uuid primary key, name text, seats int, plan_id uuid, created_at timestamptz default now())`);
-        await db.query(`create table if not exists public.plans (id uuid primary key, name text, tier text, created_at timestamptz default now())`);
-        try { await db.query("update public.plans set tier='pro' where lower(tier)='corporate'"); } catch {}
-        try {
-          await db.query('alter table public.plans drop constraint if exists plans_tier_check');
-          await db.query("alter table public.plans add constraint plans_tier_check check (tier in ('starter','plus','pro'))");
-        } catch {}
-      } catch (e: any) {
-        console.error('Bootstrap: profiles/orgs sync failed:', e.message);
-      }
-
+    // Ensure Core Schema once per process lifecycle to prevent catalog lock contention & multi-second delays on every request
+    await ensureSchemaOnce(db);
 
     // 1. Fetch Profile & Org Context First
     const profileRes = await db.query('select org_id, plan_id, is_admin, preferences, business_profile from public.profiles where user_id=$1', [userId]);
@@ -243,8 +213,8 @@ export default async function handler(req: any, res: any) {
         accountsFilter = personalFilter;
         commonFilter = personalFilter;
         transactionFilter = personalFilter;
-        // Investments/Goals currently don't have org_id, so assume personal
-        investmentFilter = 'user_id=$1'; 
+        // Investments/Goals isolated to personal scope
+        investmentFilter = personalFilter; 
     }
 
     // 3. Permission Filters (for Members)
@@ -417,10 +387,67 @@ export default async function handler(req: any, res: any) {
     const scopeType = orgId ? 'org' : 'user';
     const scopeId = String(orgId || userId);
 
+    let subRows = results[8].rows;
+    let subscription = subRows[0] || null;
+
+    // Fallback: if org user has no org subscription, check user_subscriptions
+    if (!subscription && userOrgId) {
+        try {
+            const userSub = await db.query(
+                `select provider,status,period_start,period_end,billing_period
+                 from public.user_subscriptions
+                 where user_id=$1
+                 order by
+                   case when lower(status)='active' and (period_end is null or period_end >= now()) then 0 else 1 end,
+                   coalesce(period_end, 'infinity'::timestamptz) desc nulls last,
+                   coalesce(period_start, period_end) desc nulls last,
+                   created_at desc
+                 limit 1`,
+                [userId]
+            );
+            if (userSub.rows[0]) {
+                subscription = userSub.rows[0];
+            }
+        } catch {}
+    }
+
+    // Auto-create 14-day trial if no subscription exists at all
+    if (!subscription) {
+        const trialDays = 14;
+        const endDate = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000);
+        try {
+            if (userOrgId) {
+                await db.query(
+                    "insert into public.org_subscriptions(org_id, provider, status, period_start, period_end, billing_period) values($1,'internal','active', now(), $2, 'trial') on conflict (org_id) do nothing",
+                    [userOrgId, endDate]
+                );
+                subscription = {
+                    provider: 'internal',
+                    status: 'active',
+                    period_start: new Date(),
+                    period_end: endDate,
+                    billing_period: 'trial'
+                };
+            } else {
+                await db.query(
+                    "insert into public.user_subscriptions(user_id, provider, status, period_start, period_end, billing_period) values($1,'internal','active', now(), $2, 'trial')",
+                    [userId, endDate]
+                );
+                subscription = {
+                    provider: 'internal',
+                    status: 'active',
+                    period_start: new Date(),
+                    period_end: endDate,
+                    billing_period: 'trial'
+                };
+            }
+        } catch (e: any) {
+            console.warn('Bootstrap auto trial creation warning:', e.message);
+        }
+    }
+
     // 4. Enhanced Subscription & Status Logic
     const now = new Date();
-    const subRows = results[8].rows;
-    const subscription = subRows[0] || null;
     const periodEnd = subscription?.period_end ? new Date(subscription.period_end) : null;
     const isTrial = subscription?.billing_period === 'trial';
     const isExpired = !!(periodEnd && periodEnd < now);
@@ -429,6 +456,9 @@ export default async function handler(req: any, res: any) {
     const isTotalBlocked = !!(isExpired && !isInsideGrace);
     
     const gracePeriodDays = isInsideGrace ? Math.ceil((graceEnd.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)) : 0;
+    const trialDaysRemaining = (isTrial && periodEnd && !isExpired)
+        ? Math.max(0, Math.ceil((periodEnd.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)))
+        : 0;
 
     // 5. Plan & Profile Consistency Mapping
     let effectiveTier = String(plan?.tier || 'starter').toLowerCase();
@@ -460,14 +490,14 @@ export default async function handler(req: any, res: any) {
         };
         const limits = { ...(map[t] || map.starter) };
         if (isTrial) {
-            limits.storageLimit = 5 * 1024 * 1024 * 1024; // 5GB for Trial
+            limits.storageLimit = 10 * 1024 * 1024 * 1024; // Full 10GB for Trial Pro
         }
         return limits;
     })();
 
     // 7. Usage & Quota Calculation
-    const monthKeyRes = await db.query(`select to_char(current_date, 'YYYY-MM') as yyyymm`);
-    const yyyymm = String(monthKeyRes.rows[0]?.yyyymm || '');
+    const nowUtc = new Date();
+    const yyyymm = `${nowUtc.getFullYear()}-${String(nowUtc.getMonth() + 1).padStart(2, '0')}`;
     
     const usageQueries = await Promise.all([
         db.query(`
@@ -500,6 +530,7 @@ export default async function handler(req: any, res: any) {
         isTotalBlocked,
         isOverQuota,
         gracePeriodDays,
+        trialDaysRemaining,
         viewMode: 'personal' // Always start Pessoal (Personal) by default, user can switch manually thereafter
     };
 
@@ -514,9 +545,9 @@ export default async function handler(req: any, res: any) {
             financeAccounting: isPlus || isMeiProfile || isTrial,
             docsVault: true,
             reports: true,
-            meiMonitoring: isMeiProfile, // Only when user explicitly activated MEI
+            meiMonitoring: isMeiProfile || isTrial,
             chatAi: isPlus || isTrial,
-            corporateManagement: (isPro || isTrial) && (role === 'admin' || role === 'owner')
+            corporateManagement: (isPro || isTrial) && (role === 'admin' || role === 'owner' || !userOrgId)
         };
     })();
 
@@ -542,8 +573,15 @@ export default async function handler(req: any, res: any) {
         isInsideGrace,
         isTotalBlocked,
         isOverQuota,
-        gracePeriodDays
+        gracePeriodDays,
+        trialDaysRemaining
     } : null;
+
+    const finalPlan = {
+        ...(plan || {}),
+        tier: forcedTier,
+        name: isTrial ? 'Trial Pro' : (plan?.name || (forcedTier === 'pro' ? 'Pro' : forcedTier === 'plus' ? 'Plus' : 'Starter'))
+    };
 
     const finalProfile = profile ? { ...profile, business_profile: effectiveProfile } : null;
 
@@ -561,7 +599,7 @@ export default async function handler(req: any, res: any) {
       cost_centers: results[7].rows, 
       profile: finalProfile, 
       organization, 
-      plan, 
+      plan: finalPlan, 
       subscription: enrichedSubscription, 
       monthly_summary, 
       org_role: role, 

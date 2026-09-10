@@ -6,25 +6,7 @@ import { verifySession } from './_auth_shared';
 import { getApplicableCompetences } from '../utils/meiObligationRules';
 import { calculateMeiMonthlyClosing } from '../utils/meiMonthlyClosing';
 
-let pool: Pool | null = null;
-
-const getPool = () => {
-  const g: any = globalThis as any;
-  if (g.__gf_pg_pool) return g.__gf_pg_pool as Pool;
-  if (pool) return pool;
-  const rawConnectionString = process.env.NEON_DATABASE_URL || process.env.DATABASE_URL;
-  const connectionString = rawConnectionString ? rawConnectionString.replace('?sslmode=require', '') : rawConnectionString;
-  pool = new Pool({
-    connectionString,
-    max: 5,
-    ssl: { rejectUnauthorized: false }
-  });
-  pool.on('connect', (client) => {
-    client.query('SET client_encoding = "UTF8"').catch(e => console.error('Failed to set client_encoding:', e));
-  });
-  g.__gf_pg_pool = pool;
-  return pool;
-};
+import { getPool } from './_db';
 
 const isNoDb = (): boolean => !process.env.NEON_DATABASE_URL && !process.env.DATABASE_URL;
 
@@ -95,6 +77,28 @@ export default async function handler(req: any, res: any) {
 
         const getTier = async (): Promise<string> => {
             try {
+                // 1. Active trial grants PRO tier capabilities during the 14 days
+                if (orgId) {
+                    const subRes = await db.query(
+                        "select billing_period from public.org_subscriptions where org_id=$1 and lower(status)='active' and (period_end is null or period_end >= now()) limit 1",
+                        [orgId]
+                    );
+                    if (subRes.rows[0]?.billing_period === 'trial') return 'pro';
+                }
+                const userSubRes = await db.query(
+                    "select billing_period from public.user_subscriptions where user_id=$1 and lower(status)='active' and (period_end is null or period_end >= now()) limit 1",
+                    [userId]
+                );
+                if (userSubRes.rows[0]?.billing_period === 'trial') return 'pro';
+
+                if (profile?.org_id) {
+                    const orgSubRes = await db.query(
+                        "select billing_period from public.org_subscriptions where org_id=$1 and lower(status)='active' and (period_end is null or period_end >= now()) limit 1",
+                        [profile.org_id]
+                    );
+                    if (orgSubRes.rows[0]?.billing_period === 'trial') return 'pro';
+                }
+
                 if (orgId) {
                     const orgRes = await db.query('select p.tier from public.organizations o left join public.plans p on o.plan_id = p.id where o.id=$1', [orgId]);
                     const raw = String(orgRes.rows[0]?.tier || '').toLowerCase();
@@ -148,20 +152,16 @@ export default async function handler(req: any, res: any) {
         planLimits = (limitsBySegment[segment] && limitsBySegment[segment][tier]) ? limitsBySegment[segment][tier] : limitsBySegment[segment]?.starter;
 
         assertSubscriptionActive = async () => {
-            const autoCreateInternal = String(process.env.AUTO_CREATE_INTERNAL_SUB || '').trim() === '1' || String(process.env.NODE_ENV || '').toLowerCase() !== 'production';
+            const trialDays = Math.max(1, Number(process.env.TRIAL_DAYS || 14));
             if (scopeType === 'org') {
                 const up = await db.query("select status, period_end from public.org_subscriptions where org_id=$1", [scopeId]);
                 if (!up.rows[0]) {
-                    if (autoCreateInternal) {
-                        const trialDays = Math.max(1, Number(process.env.TRIAL_DAYS || 14));
-                        const endDate = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000);
-                        await db.query(
-                          "insert into public.org_subscriptions(org_id, provider, status, period_start, period_end, billing_period) values($1,'internal','active', now(), $2, 'trial') on conflict (org_id) do nothing",
-                          [scopeId, endDate]
-                        );
-                        return;
-                    }
-                    throw new Error('subscription_inactive');
+                    const endDate = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000);
+                    await db.query(
+                      "insert into public.org_subscriptions(org_id, provider, status, period_start, period_end, billing_period) values($1,'internal','active', now(), $2, 'trial') on conflict (org_id) do nothing",
+                      [scopeId, endDate]
+                    );
+                    return;
                 }
                 const st = String(up.rows[0]?.status || '').toLowerCase();
                 const end = up.rows[0]?.period_end ? new Date(up.rows[0].period_end).getTime() : null;
@@ -169,6 +169,8 @@ export default async function handler(req: any, res: any) {
                 if (end && end < Date.now()) throw new Error('subscription_expired');
                 return;
             }
+
+            // For personal scope: check user_subscriptions first
             const active = await db.query(
               `select status, period_end
                from public.user_subscriptions
@@ -179,21 +181,26 @@ export default async function handler(req: any, res: any) {
             );
             if (active.rows[0]) return;
 
+            // Inherit org active subscription if user belongs to an org
+            if (profile?.org_id) {
+                const orgSub = await db.query(
+                    "select status, period_end from public.org_subscriptions where org_id=$1 and lower(status)='active' and (period_end is null or period_end >= now())",
+                    [profile.org_id]
+                );
+                if (orgSub.rows[0]) return;
+            }
+
             const latest = await db.query(
               "select status, period_end from public.user_subscriptions where user_id=$1 order by coalesce(period_start, period_end) desc nulls last, created_at desc limit 1",
               [userId]
             );
             if (!latest.rows[0]) {
-                if (autoCreateInternal) {
-                    const trialDays = Math.max(1, Number(process.env.TRIAL_DAYS || 14));
-                    const endDate = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000);
-                    await db.query(
-                      "insert into public.user_subscriptions(user_id, provider, status, period_start, period_end, billing_period) values($1,'internal','active', now(), $2, 'trial')",
-                      [userId, endDate]
-                    );
-                    return;
-                }
-                throw new Error('subscription_inactive');
+                const endDate = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000);
+                await db.query(
+                  "insert into public.user_subscriptions(user_id, provider, status, period_start, period_end, billing_period) values($1,'internal','active', now(), $2, 'trial')",
+                  [userId, endDate]
+                );
+                return;
             }
             const st = String(latest.rows[0]?.status || '').toLowerCase();
             const end = latest.rows[0]?.period_end ? new Date(latest.rows[0].period_end).getTime() : null;
@@ -335,6 +342,8 @@ export default async function handler(req: any, res: any) {
 
         // 2. If updating/deleting, check EXISTING record's CC
         if (recordId && table) {
+            const ALLOWED_TABLES = new Set(['transactions', 'recurrences', 'cost_centers']);
+            if (!ALLOWED_TABLES.has(table)) return false;
             const res = await db.query(`select cost_center_id from public.${table} where id=$1`, [recordId]);
             const existingCC = res.rows[0]?.cost_center_id;
             if (existingCC && !allowedEditCCs.has(existingCC)) return false;
@@ -392,7 +401,7 @@ export default async function handler(req: any, res: any) {
         if (orgId) {
             r = await db.query('select * from public.accounts where org_id=$1 order by created_at asc', [orgId]);
         } else {
-            r = await db.query('select * from public.accounts where user_id=$1 order by created_at asc', [userId]);
+            r = await db.query('select * from public.accounts where user_id=$1 and org_id is null order by created_at asc', [userId]);
         }
     } else if (type === 'accounts_insert') {
         if (isMember) throw new Error('permission_denied_member');
@@ -407,14 +416,14 @@ export default async function handler(req: any, res: any) {
         if (orgId) {
             r = await db.query('update public.accounts set name=$1, bank=$2, initial_balance=$3 where id=$4 and org_id=$5 returning *', [name, bank, initialBalance, id, orgId]);
         } else {
-            r = await db.query('update public.accounts set name=$1, bank=$2, initial_balance=$3 where id=$4 and user_id=$5 returning *', [name, bank, initialBalance, id, userId]);
+            r = await db.query('update public.accounts set name=$1, bank=$2, initial_balance=$3 where id=$4 and user_id=$5 and org_id is null returning *', [name, bank, initialBalance, id, userId]);
         }
     } else if (type === 'accounts_delete') {
         if (isMember) throw new Error('permission_denied_member');
         if (orgId) {
              r = await db.query('delete from public.accounts where id=$1 and org_id=$2', [data.id, orgId]);
         } else {
-             r = await db.query('delete from public.accounts where id=$1 and user_id=$2', [data.id, userId]);
+             r = await db.query('delete from public.accounts where id=$1 and user_id=$2 and org_id is null', [data.id, userId]);
         }
     }
     // --- TRANSACTIONS ---
@@ -509,7 +518,7 @@ export default async function handler(req: any, res: any) {
         if (orgId) {
             r = await db.query('select * from public.categories where org_id=$1 order by name asc', [orgId]);
         } else {
-            r = await db.query('select * from public.categories where user_id=$1 order by name asc', [userId]);
+            r = await db.query('select * from public.categories where user_id=$1 and org_id is null order by name asc', [userId]);
         }
     } else if (type === 'categories_insert') {
         if (isMember) throw new Error('permission_denied_member');
@@ -523,14 +532,14 @@ export default async function handler(req: any, res: any) {
         if (orgId) {
              r = await db.query('update public.categories set name=$1, type=$2, icon=$3, mei_category=$4 where id=$5 and org_id=$6 returning *', [name, ctype, icon, meiCategory, id, orgId]);
         } else {
-             r = await db.query('update public.categories set name=$1, type=$2, icon=$3, mei_category=$4 where id=$5 and user_id=$6 returning *', [name, ctype, icon, meiCategory, id, userId]);
+             r = await db.query('update public.categories set name=$1, type=$2, icon=$3, mei_category=$4 where id=$5 and user_id=$6 and org_id is null returning *', [name, ctype, icon, meiCategory, id, userId]);
         }
     } else if (type === 'categories_delete') {
         if (isMember) throw new Error('permission_denied_member');
         if (orgId) {
              r = await db.query('delete from public.categories where id=$1 and org_id=$2', [data.id, orgId]);
         } else {
-             r = await db.query('delete from public.categories where id=$1 and user_id=$2', [data.id, userId]);
+             r = await db.query('delete from public.categories where id=$1 and user_id=$2 and org_id is null', [data.id, userId]);
         }
     }
     // --- INVESTMENTS ---
@@ -538,7 +547,7 @@ export default async function handler(req: any, res: any) {
         if (orgId) {
             r = await db.query('select * from public.investments where org_id=$1 order by created_at asc', [orgId]);
         } else {
-            r = await db.query('select * from public.investments where user_id=$1 order by created_at asc', [userId]);
+            r = await db.query('select * from public.investments where user_id=$1 and org_id is null order by created_at asc', [userId]);
         }
     } else if (type === 'investments_insert') {
         if (isMember) throw new Error('permission_denied_member');
@@ -553,14 +562,14 @@ export default async function handler(req: any, res: any) {
         if (orgId) {
             r = await db.query('update public.investments set type=$1, ticker=$2, quantity=$3, purchase_price=$4, purchase_date=$5 where id=$6 and org_id=$7 returning *', [itype, ticker, quantity, purchasePrice, purchaseDate, id, orgId]);
         } else {
-            r = await db.query('update public.investments set type=$1, ticker=$2, quantity=$3, purchase_price=$4, purchase_date=$5 where id=$6 and user_id=$7 returning *', [itype, ticker, quantity, purchasePrice, purchaseDate, id, userId]);
+            r = await db.query('update public.investments set type=$1, ticker=$2, quantity=$3, purchase_price=$4, purchase_date=$5 where id=$6 and user_id=$7 and org_id is null returning *', [itype, ticker, quantity, purchasePrice, purchaseDate, id, userId]);
         }
     } else if (type === 'investments_delete') {
         if (isMember) throw new Error('permission_denied_member');
         if (orgId) {
             r = await db.query('delete from public.investments where id=$1 and org_id=$2', [data.id, orgId]);
         } else {
-            r = await db.query('delete from public.investments where id=$1 and user_id=$2', [data.id, userId]);
+            r = await db.query('delete from public.investments where id=$1 and user_id=$2 and org_id is null', [data.id, userId]);
         }
     }
     // --- FIXED INCOME ---
@@ -568,7 +577,7 @@ export default async function handler(req: any, res: any) {
         if (orgId) {
             r = await db.query('select * from public.fixed_income_investments where org_id=$1 order by created_at asc', [orgId]);
         } else {
-            r = await db.query('select * from public.fixed_income_investments where user_id=$1 order by created_at asc', [userId]);
+            r = await db.query('select * from public.fixed_income_investments where user_id=$1 and org_id is null order by created_at asc', [userId]);
         }
     } else if (type === 'fixed_income_insert') {
         if (isMember) throw new Error('permission_denied_member');
@@ -583,14 +592,14 @@ export default async function handler(req: any, res: any) {
         if (orgId) {
              r = await db.query('update public.fixed_income_investments set name=$1, issuer=$2, amount_invested=$3, yield_rate=$4, purchase_date=$5, maturity_date=$6 where id=$7 and org_id=$8 returning *', [name, issuer, amountInvested, yieldRate, purchaseDate, maturityDate, id, orgId]);
         } else {
-             r = await db.query('update public.fixed_income_investments set name=$1, issuer=$2, amount_invested=$3, yield_rate=$4, purchase_date=$5, maturity_date=$6 where id=$7 and user_id=$8 returning *', [name, issuer, amountInvested, yieldRate, purchaseDate, maturityDate, id, userId]);
+             r = await db.query('update public.fixed_income_investments set name=$1, issuer=$2, amount_invested=$3, yield_rate=$4, purchase_date=$5, maturity_date=$6 where id=$7 and user_id=$8 and org_id is null returning *', [name, issuer, amountInvested, yieldRate, purchaseDate, maturityDate, id, userId]);
         }
     } else if (type === 'fixed_income_delete') {
         if (isMember) throw new Error('permission_denied_member');
         if (orgId) {
              r = await db.query('delete from public.fixed_income_investments where id=$1 and org_id=$2', [data.id, orgId]);
         } else {
-             r = await db.query('delete from public.fixed_income_investments where id=$1 and user_id=$2', [data.id, userId]);
+             r = await db.query('delete from public.fixed_income_investments where id=$1 and user_id=$2 and org_id is null', [data.id, userId]);
         }
     }
     // --- GOALS ---
@@ -598,7 +607,7 @@ export default async function handler(req: any, res: any) {
         if (orgId) {
             r = await db.query('select * from public.goals where org_id=$1 order by created_at asc', [orgId]);
         } else {
-            r = await db.query('select * from public.goals where user_id=$1 order by created_at asc', [userId]);
+            r = await db.query('select * from public.goals where user_id=$1 and org_id is null order by created_at asc', [userId]);
         }
     } else if (type === 'goals_insert') {
         if (isMember) throw new Error('permission_denied_member');
@@ -613,14 +622,14 @@ export default async function handler(req: any, res: any) {
         if (orgId) {
              r = await db.query('update public.goals set name=$1, target_amount=$2, current_amount=$3, color=$4 where id=$5 and org_id=$6 returning *', [name, targetAmount, currentAmount, color, id, orgId]);
         } else {
-             r = await db.query('update public.goals set name=$1, target_amount=$2, current_amount=$3, color=$4 where id=$5 and user_id=$6 returning *', [name, targetAmount, currentAmount, color, id, userId]);
+             r = await db.query('update public.goals set name=$1, target_amount=$2, current_amount=$3, color=$4 where id=$5 and user_id=$6 and org_id is null returning *', [name, targetAmount, currentAmount, color, id, userId]);
         }
     } else if (type === 'goals_delete') {
         if (isMember) throw new Error('permission_denied_member');
         if (orgId) {
              r = await db.query('delete from public.goals where id=$1 and org_id=$2', [data.id, orgId]);
         } else {
-             r = await db.query('delete from public.goals where id=$1 and user_id=$2', [data.id, userId]);
+             r = await db.query('delete from public.goals where id=$1 and user_id=$2 and org_id is null', [data.id, userId]);
         }
     }
     // --- COST CENTERS ---
@@ -633,7 +642,7 @@ export default async function handler(req: any, res: any) {
                  if (orgId) {
                      r = await db.query(`select * from public.cost_centers where org_id=$1 and id in (${placeholders}) order by name asc`, [orgId, ...Array.from(allowedViewCCs)]);
                  } else {
-                     r = await db.query(`select * from public.cost_centers where user_id=$1 and id in (${placeholders}) order by name asc`, [userId, ...Array.from(allowedViewCCs)]);
+                     r = await db.query(`select * from public.cost_centers where user_id=$1 and org_id is null and id in (${placeholders}) order by name asc`, [userId, ...Array.from(allowedViewCCs)]);
                  }
              } else {
                  r = { rows: [] };
@@ -642,7 +651,7 @@ export default async function handler(req: any, res: any) {
             if (orgId) {
                  r = await db.query('select * from public.cost_centers where org_id=$1 order by name asc', [orgId]);
             } else {
-                 r = await db.query('select * from public.cost_centers where user_id=$1 order by name asc', [userId]);
+                 r = await db.query('select * from public.cost_centers where user_id=$1 and org_id is null order by name asc', [userId]);
             }
         }
     } else if (type === 'cost_centers_insert') {
@@ -661,7 +670,7 @@ export default async function handler(req: any, res: any) {
         if (orgId) {
              r = await db.query('update public.cost_centers set name=$1 where id=$2 and org_id=$3 returning *', [name, id, orgId]);
         } else {
-             r = await db.query('update public.cost_centers set name=$1 where id=$2 and user_id=$3 returning *', [name, id, userId]);
+             r = await db.query('update public.cost_centers set name=$1 where id=$2 and user_id=$3 and org_id is null returning *', [name, id, userId]);
         }
     } else if (type === 'cost_centers_delete') {
         if (isMember) throw new Error('permission_denied_member');
@@ -669,7 +678,7 @@ export default async function handler(req: any, res: any) {
         if (orgId) {
              r = await db.query('delete from public.cost_centers where id=$1 and org_id=$2', [data.id, orgId]);
         } else {
-             r = await db.query('delete from public.cost_centers where id=$1 and user_id=$2', [data.id, userId]);
+             r = await db.query('delete from public.cost_centers where id=$1 and user_id=$2 and org_id is null', [data.id, userId]);
         }
     }
     // --- RECURRENCES (Assinaturas) ---
@@ -680,7 +689,7 @@ export default async function handler(req: any, res: any) {
                 if (orgId) {
                     r = await db.query(`select * from public.recurrences where org_id=$1 and cost_center_id in (${placeholders}) order by created_at desc`, [orgId, ...Array.from(allowedViewCCs)]);
                 } else {
-                    r = await db.query(`select * from public.recurrences where user_id=$1 and cost_center_id in (${placeholders}) order by created_at desc`, [userId, ...Array.from(allowedViewCCs)]);
+                    r = await db.query(`select * from public.recurrences where user_id=$1 and org_id is null and cost_center_id in (${placeholders}) order by created_at desc`, [userId, ...Array.from(allowedViewCCs)]);
                 }
             } else {
                 r = { rows: [] };
@@ -689,7 +698,7 @@ export default async function handler(req: any, res: any) {
             if (orgId) {
                 r = await db.query('select * from public.recurrences where org_id=$1 order by created_at desc', [orgId]);
             } else {
-                r = await db.query('select * from public.recurrences where user_id=$1 order by created_at desc', [userId]);
+                r = await db.query('select * from public.recurrences where user_id=$1 and org_id is null order by created_at desc', [userId]);
             }
         }
     } else if (type === 'recurrences_insert') {
@@ -705,14 +714,14 @@ export default async function handler(req: any, res: any) {
         if (orgId) {
              r = await db.query('update public.recurrences set label=$1, amount=$2, category=$3, account_id=$4, payment_method=$5, day_of_month=$6, business_day_rule=$7, cost_center_id=$8, active=$9 where id=$10 and org_id=$11 returning *', [label, amount, category, accountId, paymentMethod, dayOfMonth, businessDayRule, costCenterId, active, id, orgId]);
         } else {
-             r = await db.query('update public.recurrences set label=$1, amount=$2, category=$3, account_id=$4, payment_method=$5, day_of_month=$6, business_day_rule=$7, cost_center_id=$8, active=$9 where id=$10 and user_id=$11 returning *', [label, amount, category, accountId, paymentMethod, dayOfMonth, businessDayRule, costCenterId, active, id, userId]);
+             r = await db.query('update public.recurrences set label=$1, amount=$2, category=$3, account_id=$4, payment_method=$5, day_of_month=$6, business_day_rule=$7, cost_center_id=$8, active=$9 where id=$10 and user_id=$11 and org_id is null returning *', [label, amount, category, accountId, paymentMethod, dayOfMonth, businessDayRule, costCenterId, active, id, userId]);
         }
     } else if (type === 'recurrences_delete') {
         if (!(await checkWritePermission(undefined, data.id, 'recurrences'))) throw new Error('permission_denied_cc');
         if (orgId) {
              r = await db.query('delete from public.recurrences where id=$1 and org_id=$2', [data.id, orgId]);
         } else {
-             r = await db.query('delete from public.recurrences where id=$1 and user_id=$2', [data.id, userId]);
+             r = await db.query('delete from public.recurrences where id=$1 and user_id=$2 and org_id is null', [data.id, userId]);
         }
     }
     // --- MEI MONTHLY CLOSINGS ---
@@ -822,7 +831,7 @@ export default async function handler(req: any, res: any) {
              where = 'org_id=$1';
              params.push(orgId);
         } else {
-             where = 'user_id=$1';
+             where = 'user_id=$1 and org_id is null';
              params.push(userId);
         }
         
@@ -865,14 +874,14 @@ export default async function handler(req: any, res: any) {
         if (orgId) {
             r = await db.query('update public.payables set title=$1, amount=$2, issue_date=$3, due_date=$4, category=$5, cost_center_id=$6, supplier=$7, notes=$8, status=coalesce($9,status), updated_at=now() where id=$10 and org_id=$11 returning *', [title, amount, issueDate, dueDate, category, costCenterId, supplier, notes, status, id, orgId]);
         } else {
-            r = await db.query('update public.payables set title=$1, amount=$2, issue_date=$3, due_date=$4, category=$5, cost_center_id=$6, supplier=$7, notes=$8, status=coalesce($9,status), updated_at=now() where id=$10 and user_id=$11 returning *', [title, amount, issueDate, dueDate, category, costCenterId, supplier, notes, status, id, userId]);
+            r = await db.query('update public.payables set title=$1, amount=$2, issue_date=$3, due_date=$4, category=$5, cost_center_id=$6, supplier=$7, notes=$8, status=coalesce($9,status), updated_at=now() where id=$10 and user_id=$11 and org_id is null returning *', [title, amount, issueDate, dueDate, category, costCenterId, supplier, notes, status, id, userId]);
         }
     } else if (type === 'payables_delete') {
         if (!(await checkWritePermission(undefined, data.id, 'payables'))) throw new Error('permission_denied_cc');
         if (orgId) {
              r = await db.query('delete from public.payables where id=$1 and org_id=$2', [data.id, orgId]);
         } else {
-             r = await db.query('delete from public.payables where id=$1 and user_id=$2', [data.id, userId]);
+             r = await db.query('delete from public.payables where id=$1 and user_id=$2 and org_id is null', [data.id, userId]);
         }
     } else if (type === 'payables_mark_paid') {
         const { id, paidAmount, paidDate, accountId, paymentMethod, description, discountAmount, penaltyAmount } = data;
@@ -882,7 +891,7 @@ export default async function handler(req: any, res: any) {
         if (orgId) {
             row = (await db.query('select * from public.payables where id=$1 and org_id=$2', [id, orgId])).rows[0];
         } else {
-            row = (await db.query('select * from public.payables where id=$1 and user_id=$2', [id, userId])).rows[0];
+            row = (await db.query('select * from public.payables where id=$1 and user_id=$2 and org_id is null', [id, userId])).rows[0];
         }
 
         if (!row) throw new Error('not_found');
@@ -903,14 +912,14 @@ export default async function handler(req: any, res: any) {
         if (orgId) {
              r = await db.query('update public.payables set status=$1, paid_amount=$2, transaction_id=$3, updated_at=now() where id=$4 and org_id=$5 returning *', ['paid', baseAmt, txId, id, orgId]);
         } else {
-             r = await db.query('update public.payables set status=$1, paid_amount=$2, transaction_id=$3, updated_at=now() where id=$4 and user_id=$5 returning *', ['paid', baseAmt, txId, id, userId]);
+             r = await db.query('update public.payables set status=$1, paid_amount=$2, transaction_id=$3, updated_at=now() where id=$4 and user_id=$5 and org_id is null returning *', ['paid', baseAmt, txId, id, userId]);
         }
         
         let tx;
         if (orgId) {
              tx = (await db.query('select * from public.transactions where id=$1 and org_id=$2', [txId, orgId])).rows[0];
         } else {
-             tx = (await db.query('select * from public.transactions where id=$1 and user_id=$2', [txId, userId])).rows[0];
+             tx = (await db.query('select * from public.transactions where id=$1 and user_id=$2 and org_id is null', [txId, userId])).rows[0];
         }
         
         res.statusCode = 200; res.setHeader('content-type','application/json'); 
@@ -927,7 +936,7 @@ export default async function handler(req: any, res: any) {
              where = 'org_id=$1';
              params.push(orgId);
         } else {
-             where = 'user_id=$1';
+             where = 'user_id=$1 and org_id is null';
              params.push(userId);
         }
         
@@ -968,14 +977,14 @@ export default async function handler(req: any, res: any) {
         if (orgId) {
              r = await db.query('update public.receivables set title=$1, amount=$2, issue_date=$3, due_date=$4, category=$5, cost_center_id=$6, customer=$7, notes=$8, status=coalesce($9,status), updated_at=now() where id=$10 and org_id=$11 returning *', [title, amount, issueDate, dueDate, category, costCenterId, customer, notes, status, id, orgId]);
         } else {
-             r = await db.query('update public.receivables set title=$1, amount=$2, issue_date=$3, due_date=$4, category=$5, cost_center_id=$6, customer=$7, notes=$8, status=coalesce($9,status), updated_at=now() where id=$10 and user_id=$11 returning *', [title, amount, issueDate, dueDate, category, costCenterId, customer, notes, status, id, userId]);
+             r = await db.query('update public.receivables set title=$1, amount=$2, issue_date=$3, due_date=$4, category=$5, cost_center_id=$6, customer=$7, notes=$8, status=coalesce($9,status), updated_at=now() where id=$10 and user_id=$11 and org_id is null returning *', [title, amount, issueDate, dueDate, category, costCenterId, customer, notes, status, id, userId]);
         }
     } else if (type === 'receivables_delete') {
         if (!(await checkWritePermission(undefined, data.id, 'receivables'))) throw new Error('permission_denied_cc');
         if (orgId) {
              r = await db.query('delete from public.receivables where id=$1 and org_id=$2', [data.id, orgId]);
         } else {
-             r = await db.query('delete from public.receivables where id=$1 and user_id=$2', [data.id, userId]);
+             r = await db.query('delete from public.receivables where id=$1 and user_id=$2 and org_id is null', [data.id, userId]);
         }
     } else if (type === 'receivables_mark_received') {
         const { id, receivedAmount, receivedDate, accountId, paymentMethod, description } = data;
@@ -985,7 +994,7 @@ export default async function handler(req: any, res: any) {
         if (orgId) {
             row = (await db.query('select * from public.receivables where id=$1 and org_id=$2', [id, orgId])).rows[0];
         } else {
-            row = (await db.query('select * from public.receivables where id=$1 and user_id=$2', [id, userId])).rows[0];
+            row = (await db.query('select * from public.receivables where id=$1 and user_id=$2 and org_id is null', [id, userId])).rows[0];
         }
 
         if (!row) throw new Error('not_found');
@@ -999,14 +1008,14 @@ export default async function handler(req: any, res: any) {
         if (orgId) {
              r = await db.query('update public.receivables set status=$1, received_amount=$2, transaction_id=$3, updated_at=now() where id=$4 and org_id=$5 returning *', ['received', receivedAmount ?? row.amount, txId, id, orgId]);
         } else {
-             r = await db.query('update public.receivables set status=$1, received_amount=$2, transaction_id=$3, updated_at=now() where id=$4 and user_id=$5 returning *', ['received', receivedAmount ?? row.amount, txId, id, userId]);
+             r = await db.query('update public.receivables set status=$1, received_amount=$2, transaction_id=$3, updated_at=now() where id=$4 and user_id=$5 and org_id is null returning *', ['received', receivedAmount ?? row.amount, txId, id, userId]);
         }
         
         let tx;
         if (orgId) {
              tx = (await db.query('select * from public.transactions where id=$1 and org_id=$2', [txId, orgId])).rows[0];
         } else {
-             tx = (await db.query('select * from public.transactions where id=$1 and user_id=$2', [txId, userId])).rows[0];
+             tx = (await db.query('select * from public.transactions where id=$1 and user_id=$2 and org_id is null', [txId, userId])).rows[0];
         }
         
         res.statusCode = 200; res.setHeader('content-type','application/json'); 
@@ -1045,7 +1054,7 @@ export default async function handler(req: any, res: any) {
             whereClause = 'org_id=$1';
             baseParams.push(orgId);
         } else {
-            whereClause = 'user_id=$1';
+            whereClause = 'user_id=$1 and org_id is null';
             baseParams.push(userId);
         }
 

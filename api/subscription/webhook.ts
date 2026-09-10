@@ -1,15 +1,4 @@
-import { Pool } from 'pg';
-
-const getPool = () => {
-    const rawConnectionString = process.env.NEON_DATABASE_URL || process.env.DATABASE_URL;
-    const connectionString = rawConnectionString ? rawConnectionString.replace('?sslmode=require', '') : rawConnectionString;
-    return new Pool({
-        connectionString,
-        ssl: { rejectUnauthorized: false },
-        max: 5,
-        idleTimeoutMillis: 30000,
-    });
-};
+import { getPool } from '../_db';
 
 export default async function handler(req: any, res: any) {
     if (req.method !== 'POST') {

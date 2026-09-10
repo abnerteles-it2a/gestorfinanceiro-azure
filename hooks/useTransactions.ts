@@ -1,8 +1,7 @@
 import { useMemo } from 'react';
 import { useFinancialData } from '../context/FinancialDataContext';
-import { Transaction } from '../types';
-
-import { TransactionType } from '../types';
+import { Transaction, TransactionType } from '../types';
+import { isIncomeTx, isExpenseTx, isTransferTx } from '../utils/transactionHelpers';
 
 export interface UseTransactionsOptions {
     accountId?: string;
@@ -35,7 +34,13 @@ export const useTransactions = ({
             const matchesStartDate = !startDate || transactionDate >= new Date(startDate);
             const matchesEndDate = !endDate || transactionDate <= new Date(endDate + 'T23:59:59');
             
-            const matchesType = transactionType === 'all' || t.transactionType === transactionType;
+            let matchesType = transactionType === 'all';
+            if (!matchesType) {
+                if (transactionType === TransactionType.INCOME) matchesType = isIncomeTx(t.transactionType);
+                else if (transactionType === TransactionType.EXPENSE) matchesType = isExpenseTx(t.transactionType);
+                else if (transactionType === TransactionType.TRANSFER) matchesType = isTransferTx(t.transactionType);
+                else matchesType = String(t.transactionType || '').toLowerCase() === String(transactionType).toLowerCase();
+            }
 
             return matchesAccount && matchesCostCenter && matchesSearch && matchesStartDate && matchesEndDate && matchesType;
         });

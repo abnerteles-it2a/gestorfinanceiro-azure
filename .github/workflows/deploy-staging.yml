@@ -1,0 +1,64 @@
+name: Deploy Staging to Azure Container Apps
+
+on:
+  push:
+    branches:
+      - staging
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  validate:
+    name: Typecheck, Test & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: TypeScript Typecheck
+        run: npm run typecheck
+
+      - name: Run Unit Tests
+        run: npm test
+
+      - name: Build Application
+        run: npm run build
+
+  deploy:
+    name: Build Docker & Deploy to Azure Container Apps
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Build & Push Image via Azure Container Registry (ACR)
+        run: |
+          az acr build \
+            --registry acraiopsprodit2a \
+            --image gestorfinanceiro:staging \
+            .
+
+      - name: Deploy to Azure Container Apps (Staging)
+        run: |
+          az containerapp update \
+            --name ca-gestor-staging \
+            --resource-group rg-aiops-prod \
+            --image acraiopsprodit2a.azurecr.io/gestorfinanceiro:staging

@@ -49,14 +49,31 @@ const isRateLimited = (userId: string, source: string) => {
 };
 
 export default async function handler(req: any, res: any) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    res.statusCode = 200;
+    res.end();
+    return;
+  }
+
   if (req.method !== 'GET') {
     res.statusCode = 405;
     res.end(JSON.stringify({ error: 'method_not_allowed' }));
     return;
   }
 
-  const auth = await verifySession(req, res, getPool());
-  if (!auth) return;
+  // Identifica o usuário por token ou por IP para rate-limiting
+  let clientIdentifier = req.headers?.['x-forwarded-for'] || req.socket?.remoteAddress || 'public_client';
+  try {
+    const authHeader = req.headers?.authorization || '';
+    if (authHeader.startsWith('Bearer ')) {
+      const auth = await verifySession(req, { statusCode: 200, setHeader: () => {}, end: () => {} }, getPool());
+      if (auth?.userId) clientIdentifier = auth.userId;
+    }
+  } catch {}
 
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
@@ -69,7 +86,7 @@ export default async function handler(req: any, res: any) {
       res.end(JSON.stringify({ error: 'invalid_market_request' }));
       return;
     }
-    if (isRateLimited(auth.userId, source)) {
+    if (isRateLimited(clientIdentifier, source)) {
       res.statusCode = 429;
       res.setHeader('Retry-After', '60');
       res.setHeader('content-type', 'application/json');
@@ -83,7 +100,10 @@ export default async function handler(req: any, res: any) {
         target.searchParams.set(key, value);
       }
     });
-    if (source === 'brapi' && process.env.BRAPI_TOKEN) target.searchParams.set('token', process.env.BRAPI_TOKEN);
+    if (source === 'brapi') {
+      const brapiToken = process.env.BRAPI_TOKEN || 'nywRh48qY7qMZ2aPjBARn1';
+      target.searchParams.set('token', brapiToken);
+    }
 
     const cacheKey = target.toString().replace(/([?&])token=[^&]*/u, '$1token=redacted');
     const cached = cache.get(cacheKey);

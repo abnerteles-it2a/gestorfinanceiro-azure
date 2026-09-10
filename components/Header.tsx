@@ -16,6 +16,7 @@ interface HeaderProps {
     onOpenSettings: () => void;
     onUpgrade?: (tier?: string) => void;
     hideBar?: boolean; // When true, hides the top action bar but keeps subscription banners
+    moduleTitle?: string;
 }
 
 const VIEW_TITLES: Record<string, string> = {
@@ -32,7 +33,7 @@ const VIEW_TITLES: Record<string, string> = {
     support: 'Suporte & Feedback'
 };
 
-export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, onOpenSettings, onUpgrade, hideBar = false }) => {
+export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, onOpenSettings, onUpgrade, hideBar = false, moduleTitle }) => {
     const { theme, toggleTheme } = useTheme();
     const { 
         isPrivacyMode, togglePrivacyMode, marketDataTs, isMarketLoading, 
@@ -62,32 +63,41 @@ export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, onOpe
             <InviteReceiver />
 
             {showTrialBanner && (
-                <div className="bg-[#0D9488] text-white py-2 px-4 text-center text-xs font-bold tracking-wide animate-in slide-in-from-top duration-500">
-                    <span className="uppercase">Acesso Total Trial:</span> Você tem {subscriptionInfo?.gracePeriodDays || 14} dias restantes para testar todas as funcionalidades PRO!
+                <div className="bg-[#0D9488] text-white py-1.5 px-4 text-center text-xs font-bold tracking-wide animate-in slide-in-from-top duration-300">
+                    <span className="uppercase">Acesso Total Trial:</span> Você tem {subscriptionInfo?.trialDaysRemaining ?? subscriptionInfo?.gracePeriodDays ?? 14} dias restantes para testar todas as funcionalidades PRO!
                 </div>
             )}
             {showGraceBanner && (
-                <div className="bg-amber-500 text-white py-2 px-4 text-center text-xs font-bold tracking-wide animate-pulse">
+                <div className="bg-amber-500 text-white py-1.5 px-4 text-center text-xs font-bold tracking-wide animate-pulse">
                     <span className="uppercase">Assinatura Expirada:</span> Seu período de graça termina em {subscriptionInfo?.gracePeriodDays} dias. <button onClick={() => setActiveView('checkout')} className="underline ml-2">Renovar agora</button>
                 </div>
             )}
             {showExpiredBanner && (
-                <div className="bg-rose-500 text-white py-2 px-4 text-center text-xs font-bold tracking-wide">
+                <div className="bg-rose-500 text-white py-1.5 px-4 text-center text-xs font-bold tracking-wide">
                     <span className="uppercase">Assinatura Expirada:</span> Suas funcionalidades foram congeladas. <button onClick={() => setActiveView('checkout')} className="underline ml-2">Regularizar Assinatura</button>
                 </div>
             )}
             {showOverQuotaBanner && (
-                <div className="bg-orange-500 text-white py-2 px-4 text-center text-xs font-bold tracking-wide">
+                <div className="bg-orange-500 text-white py-1.5 px-4 text-center text-xs font-bold tracking-wide">
                     <span className="uppercase">Cofre Cheio:</span> Você ultrapassou o limite de armazenamento do seu plano. <button onClick={() => setActiveView('checkout')} className="underline ml-2">Fazer Upgrade</button>
                 </div>
             )}
 
             {!hideBar && (
-            <header className="app-topbar no-print bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border-b border-white/20 dark:border-slate-800 sticky top-0 z-30 w-full transition-all duration-300 shadow-sm">
-            <div className="px-6 lg:px-10">
-                <div className="flex items-center justify-between h-20">
-                    <div className="flex items-center gap-4">
-                        <div className="hidden lg:flex items-center gap-2">
+            <header className="app-topbar no-print bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 sticky top-0 z-30 w-full transition-all duration-300 shadow-xs">
+            <div className="px-4 sm:px-6 lg:px-8">
+                <div className="flex items-center justify-between h-11 sm:h-12">
+                    <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                        {moduleTitle && (
+                            <div className="flex items-center gap-2 shrink-0">
+                                <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-slate-800 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-md border border-slate-200/80 dark:border-slate-700/60 shadow-xs whitespace-nowrap">
+                                    {moduleTitle}
+                                </span>
+                                <span className="hidden sm:inline-block w-1 h-1 rounded-full bg-slate-300 dark:bg-slate-700" />
+                            </div>
+                        )}
+
+                        <div className="hidden sm:flex items-center gap-2 min-w-0">
                             {(() => {
                                 const tier = String(planInfo?.tier || '').toLowerCase();
                                 if (!tier) return null as any;
@@ -98,7 +108,7 @@ export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, onOpe
                                 };
                                 const cls = map[tier] || map.starter;
                                 const label = subscriptionInfo?.isTrial ? 'Trial PRO' : (tier === 'starter' ? 'Starter' : tier === 'plus' ? 'Plus' : 'Pro');
-                                return (<span className={`text-[10px] uppercase px-2 py-0.5 rounded-md font-bold tracking-wider border border-transparent ${cls}`}>{label}</span>);
+                                return (<span className={`text-[9px] uppercase px-2 py-0.5 rounded font-bold tracking-wider border border-transparent shrink-0 ${cls}`}>{label}</span>);
                             })()}
 
                             {(() => {
@@ -107,9 +117,9 @@ export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, onOpe
                                 if (!Number.isFinite(used) || !Number.isFinite(lim) || lim <= 0) return null as any;
                                 const isUnlimited = lim >= 1_000_000;
                                 return (
-                                  <div className="flex items-center gap-2 pl-3 ml-2 border-l border-slate-200 dark:border-slate-800" title="Uso de lançamentos no mês">
-                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest hidden xl:inline-block">LANÇAMENTOS NO MÊS:</span>
-                                    <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                                  <div className="hidden xl:flex items-center gap-1.5 pl-2 ml-1 border-l border-slate-200 dark:border-slate-800 shrink-0" title="Uso de lançamentos no mês">
+                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">LANÇAMENTOS:</span>
+                                    <span className="text-[10px] font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
                                         {used.toLocaleString('pt-BR')} / {isUnlimited ? '∞' : lim.toLocaleString('pt-BR')}
                                     </span>
                                   </div>
@@ -119,7 +129,7 @@ export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, onOpe
                     </div>
 
 
-                    <div className="flex items-center space-x-3">
+                    <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
                         {(() => {
                             const tier = String(planInfo?.tier || '').toLowerCase();
                             const isTrial = !!subscriptionInfo?.isTrial;
@@ -128,39 +138,39 @@ export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, onOpe
                             const isOrg = viewMode === 'organization';
                             
                             return (
-                                <div className="flex items-center gap-4 bg-slate-100/80 dark:bg-slate-900/40 p-1 rounded-2xl border border-slate-200/50 dark:border-slate-800">
+                                <div className="flex items-center gap-2 bg-slate-100/80 dark:bg-slate-900/60 p-0.5 rounded-xl border border-slate-200/60 dark:border-slate-800">
                                     <div className="flex p-0.5 gap-1">
                                         <button
                                             onClick={() => viewMode !== 'personal' && toggleViewMode()}
-                                            className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                                            className={`px-3 py-1 rounded-lg text-[9.5px] font-black uppercase tracking-wider transition-all ${
                                                 !isOrg 
-                                                ? 'bg-white dark:bg-slate-800 shadow-sm text-[#0D9488] dark:text-[#0D9488] ring-1 ring-slate-200/50 dark:ring-white/10' 
+                                                ? 'bg-white dark:bg-slate-800 shadow-xs text-[#0D9488] dark:text-[#0D9488] ring-1 ring-slate-200/50 dark:ring-white/10' 
                                                 : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300'
                                             }`}
                                         >
                                             Pessoal
                                         </button>
                                         <button
-                                            onClick={() => !isTrial && viewMode !== 'organization' && toggleViewMode()}
-                                            disabled={isTrial}
-                                            className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                                            onClick={() => viewMode !== 'organization' && toggleViewMode()}
+                                            className={`px-3 py-1 rounded-lg text-[9.5px] font-black uppercase tracking-wider transition-all ${
                                                 isOrg 
-                                                ? 'bg-white dark:bg-slate-800 shadow-sm text-[#0D9488] dark:text-[#0D9488] ring-1 ring-slate-200/50 dark:ring-white/10' 
+                                                ? 'bg-white dark:bg-slate-800 shadow-xs text-[#0D9488] dark:text-[#0D9488] ring-1 ring-slate-200/50 dark:ring-white/10' 
                                                 : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300'
-                                            } ${isTrial ? 'cursor-not-allowed opacity-50' : ''}`}
-                                            title={isTrial ? "Disponível após o trial" : organizationInfo.name}
+                                            }`}
+                                            title={organizationInfo.name}
                                         >
                                             Corporativo
                                         </button>
                                     </div>
                                     {isTrial && (
-                                        <span className="hidden xl:inline text-[9px] font-bold text-amber-500 bg-amber-500/10 px-2 py-1 rounded-lg uppercase tracking-wider">
+                                        <span className="hidden 2xl:inline text-[8.5px] font-bold text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded uppercase tracking-wider">
                                             Trial PRO
                                         </span>
                                     )}
                                 </div>
                             );
                         })()}
+
 
                         {(orgRole === 'owner' || orgRole === 'admin') && organizationInfo && (
                             <button onClick={() => setActiveView('orgAdmin')} className="text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-800 text-xs font-medium md:hidden" aria-label="Organização" title="Painel da Organização">

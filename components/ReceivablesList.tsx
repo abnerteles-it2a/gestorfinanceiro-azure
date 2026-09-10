@@ -4,13 +4,15 @@ import { formatCurrency, formatCurrencyForInput, parseCurrencyInput } from '../u
 import { calcValorParcelas, calcDataParcelas } from '../utils/financial';
 import { StatusTag } from './ui/StatusTag';
 import { EmptyState } from './ui/EmptyState';
-import { DocumentIcon, CheckCircleIcon, EditIcon, TrashIcon } from './icons';
+import { DocumentIcon, CheckCircleIcon, EditIcon, TrashIcon, SparklesIcon } from './icons';
 import { DataTable, Column } from './ui/DataTable';
 import { TableToolbar } from './ui/TableToolbar';
 import { Input } from './ui/Forms/Input';
 import { Select } from './ui/Forms/Select';
 import { FormField } from './ui/Forms/FormField';
 import { InlineAlert } from './ui/InlineAlert';
+import { VoiceRecordButton } from './ui/VoiceRecordButton';
+import { parseTransactionFromText } from '../services/marketDataService';
 
 const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 
@@ -48,9 +50,61 @@ export const ReceivablesList: React.FC<{ readOnly?: boolean; hideAddForm?: boole
   const [editStatus, setEditStatus] = useState('open');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string>('');
 
+  const [isVoiceProcessing, setIsVoiceProcessing] = useState(false);
+
   const currentMonth = useMemo(()=>monthKey(new Date()),[]);
   const [monthFilter, setMonthFilter] = useState<string>(currentMonth);
   const [statusFilter, setStatusFilter] = useState<string>('open');
+
+  const handleVoiceReceivable = async (speechText: string) => {
+    if (!speechText || speechText.trim().length < 2) return;
+    setIsVoiceProcessing(true);
+    try {
+      const res = await fetch('/api/ai/advice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'receivable',
+          context: {
+            text: speechText,
+            today: new Date().toISOString().slice(0, 10),
+            categories: categories.filter(c => c.type === 'Entrada').map(c => c.name),
+            costCenters: costCenters.map(c => ({ id: c.id, name: c.name }))
+          }
+        })
+      });
+      let tx: any = null;
+      if (res.ok) {
+        const data = await res.json();
+        tx = data?.transaction;
+      }
+      if (!tx) {
+        const local = await parseTransactionFromText(speechText, categories.map(c => c.name), accounts.map(a => ({ id: a.id, name: a.name })));
+        if (local) {
+          tx = {
+            description: local.description,
+            amount: local.amount,
+            date: local.date,
+            category: local.category
+          };
+        }
+      }
+      if (tx) {
+        if (tx.description) setTitle(tx.description);
+        if (tx.amount) setAmount(String(tx.amount));
+        if (tx.date) setDueDate(tx.date);
+        if (tx.category) setCategory(tx.category);
+        if (tx.costCenterId) setCostCenterId(tx.costCenterId);
+        if (tx.customer) setCustomer(tx.customer);
+        if (tx.installments && tx.installments > 1) setInstallments(tx.installments);
+        setErrorToast('');
+      }
+    } catch (e) {
+      console.error('Voice receivable error:', e);
+    } finally {
+      setIsVoiceProcessing(false);
+    }
+  };
 
   const isFiltered = monthFilter !== currentMonth || statusFilter !== 'all';
 
@@ -310,7 +364,26 @@ export const ReceivablesList: React.FC<{ readOnly?: boolean; hideAddForm?: boole
 
         {(!hideAddForm && !readOnly) && (
         <form onSubmit={onAdd} className="grid grid-cols-1 md:grid-cols-12 gap-3 mb-6 bg-slate-50/50 dark:bg-slate-900/10 p-5 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-sm relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500 rounded-l-2xl"></div>
+          <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500 rounded-l-2xl"></div>
+
+          {/* Atalho por Voz */}
+          <div className="md:col-span-12 flex items-center justify-between bg-emerald-50/70 dark:bg-emerald-950/30 p-2.5 rounded-xl border border-emerald-200/60 dark:border-emerald-800/40 mb-1">
+            <div className="flex items-center gap-2">
+              <SparklesIcon className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                Preenchimento Rápido por Voz
+              </span>
+              <span className="hidden sm:inline text-[11px] text-slate-500 dark:text-slate-400">
+                (ex: "Receber consultoria 3500 reais dia 15 cliente IT2A")
+              </span>
+            </div>
+            <VoiceRecordButton
+              onSpeechResult={handleVoiceReceivable}
+              isProcessing={isVoiceProcessing}
+              label="Ditar Recebimento"
+              size="sm"
+            />
+          </div>
           
           <FormField label="Título" className="md:col-span-3">
             <Input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Ex: Venda" required />

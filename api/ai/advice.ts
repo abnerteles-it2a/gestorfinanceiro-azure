@@ -67,22 +67,27 @@ export default async function handler(req: any, res: any) {
 
     let text = '';
     let transaction: any = null;
+    let investmentTransaction: any = null;
     let provider = 'gestor_financeiro';
     let usedModel = 'Gestor Financeiro Intelligence Engine';
 
     try {
-      if (kind === 'transaction') {
-        const prompt = `Você é o parser especialista de lançamentos financeiros do Gestor Financeiro.
-Analise a mensagem ou comando do usuário e preencha os campos da transação retornando estritamente um objeto JSON com o formato:
+      if (kind === 'transaction' || kind === 'payable' || kind === 'receivable') {
+        const prompt = `Você é o parser especialista de lançamentos financeiros e contas do Gestor Financeiro.
+Analise a mensagem ou comando do usuário e preencha os campos retornando estritamente um objeto JSON com o formato:
 {
-  "accountId": "ID da conta correspondente da lista de contas ou a mais coerente",
-  "type": "Entrada" ou "Saída",
+  "accountId": "ID da conta de origem correspondente da lista de contas ou a mais coerente",
+  "toAccountId": "ID da conta de destino se for uma Transferência entre contas ou null",
+  "type": "Entrada" | "Saída" | "Transferência",
   "category": "Nome exato da categoria que mais combina da lista fornecida, ou 'Outros'",
-  "description": "Descrição limpa do que foi comprado/recebido",
+  "description": "Descrição limpa do que foi comprado/recebido/pago",
   "amount": número decimal positivo (ex: 45.50),
-  "date": "YYYY-MM-DD (resolva termos como 'hoje', 'ontem' a partir da data de referência)",
+  "date": "YYYY-MM-DD (resolva termos como 'hoje', 'amanhã', 'ontem', 'dia 15' a partir da data de referência)",
   "paymentMethod": "PIX" | "Cartão de Crédito" | "Cartão de Débito" | "Dinheiro" | "Transferência Bancária" | "Boleto" | "Outros",
-  "costCenterId": "ID do centro de custo se aplicável ou null"
+  "costCenterId": "ID do centro de custo se aplicável ou null",
+  "supplier": "Nome do fornecedor ou favorecido se mencionado ou null",
+  "customer": "Nome do cliente ou pagador se mencionado ou null",
+  "installments": número inteiro de parcelas se mencionado (ex: 1, 3, 10) ou 1
 }
 
 Dados de Referência:
@@ -101,13 +106,66 @@ Texto do Usuário: "${txCtxObj.text}"`;
         const parsed = JSON.parse(rawJson);
         transaction = {
           accountId: parsed.accountId || (txCtxObj.accounts[0]?.id ? String(txCtxObj.accounts[0].id) : ''),
-          type: parsed.type === 'Entrada' ? 'Entrada' : 'Saída',
-          category: parsed.category || 'Outros',
+          toAccountId: parsed.toAccountId || undefined,
+          type: parsed.type === 'Transferência' ? 'Transferência' : (parsed.type === 'Entrada' ? 'Entrada' : 'Saída'),
+          category: parsed.category || (parsed.type === 'Transferência' ? 'Transferência' : 'Outros'),
           description: parsed.description || txCtxObj.text,
           amount: Number(parsed.amount) || 0,
           date: parsed.date || txCtxObj.today,
           paymentMethod: parsed.paymentMethod || 'PIX',
           costCenterId: parsed.costCenterId || undefined,
+          supplier: parsed.supplier || undefined,
+          customer: parsed.customer || undefined,
+          installments: Number(parsed.installments) || 1,
+        };
+      } else if (kind === 'investment_transaction') {
+        const prompt = `Você é o parser especialista de operações de investimentos do Gestor Financeiro.
+Analise a mensagem ou comando falado pelo usuário e preencha os dados da operação de investimento retornando estritamente um objeto JSON com o formato:
+{
+  "assetType": "Ações" | "Fundos Imobiliários" | "Renda Fixa" | "Criptomoedas" | "BDRs" | "ETFs",
+  "operation": "buy" | "sell" | "dividend",
+  "ticker": "Código do ativo em maiúsculo (ex: PETR4, MXRF11, BTC, IVVB11, AAPL34) ou vazio se Renda Fixa",
+  "name": "Nome descritivo do ativo (ex: CDB Banco Inter, Tesouro Selic 2029, Petrobras)",
+  "issuer": "Emissor caso seja Renda Fixa (ex: Banco Inter, Tesouro Nacional) ou vazio",
+  "quantity": número positivo (ex: 10, 50, 0.05) ou 1 se não aplicável,
+  "purchasePrice": número decimal do preço unitário em R$ (ex: 35.50, 10.25),
+  "amountInvested": número decimal do valor total em R$ (ex: 5000.00),
+  "yieldRate": "Taxa de rendimento se for Renda Fixa (ex: 110% CDI, IPCA + 6.5%, 12% a.a.) ou vazio",
+  "maturityDate": "Data de vencimento YYYY-MM-DD se informada ou vazia",
+  "date": "YYYY-MM-DD (data da operação a partir da referência)",
+  "paymentMethod": "Saldo Corretora" | "Saldo Conta" | "PIX" | "Transferência Bancária" | "Outros"
+}
+
+Data de Referência: ${String(ctx.today || new Date().toISOString().split('T')[0])}
+Texto Falado pelo Usuário: "${questionRaw || String(ctx.text || '')}"`;
+
+        const rawJson = await askAzureOpenAI({
+          messages: [
+            { role: 'system', content: 'Você é um assistente estrito de extração JSON de investimentos. Retorne apenas JSON válido.' },
+            { role: 'user', content: prompt }
+          ],
+          jsonMode: true,
+          temperature: 0.1,
+        });
+
+        const parsed = JSON.parse(rawJson);
+        const qty = Number(parsed.quantity) || 0;
+        const price = Number(parsed.purchasePrice) || 0;
+        const total = Number(parsed.amountInvested) || (qty > 0 && price > 0 ? qty * price : 0);
+
+        investmentTransaction = {
+          assetType: parsed.assetType || 'Ações',
+          operation: parsed.operation || 'buy',
+          ticker: String(parsed.ticker || '').toUpperCase().trim(),
+          name: String(parsed.name || parsed.ticker || '').trim(),
+          issuer: String(parsed.issuer || '').trim(),
+          quantity: qty,
+          purchasePrice: price,
+          amountInvested: total,
+          yieldRate: String(parsed.yieldRate || '').trim(),
+          maturityDate: parsed.maturityDate || '',
+          date: parsed.date || String(ctx.today || new Date().toISOString().split('T')[0]),
+          paymentMethod: parsed.paymentMethod || 'Saldo Corretora',
         };
       } else if (kind === 'investment_simulator') {
         const simData = input?.simulation || ctx?.simulation || {};
@@ -265,7 +323,7 @@ ${financeCtx}`;
 
     res.statusCode = 200;
     res.setHeader('content-type', 'application/json');
-    res.end(JSON.stringify(transaction ? { text, transaction } : { text }));
+    res.end(JSON.stringify(transaction ? { text, transaction } : investmentTransaction ? { text, investment: investmentTransaction } : { text }));
   } catch (e: any) {
     console.error('Advice Error:', e);
     res.statusCode = 500;

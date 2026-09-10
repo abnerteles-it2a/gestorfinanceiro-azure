@@ -96,16 +96,31 @@ export default async function handler(req: any, res: any) {
   console.log(`Proactive Agent: Generating insights for user ${userId} (View: ${viewMode}, ScopeId: ${queryScopeId}) using provider ${provider}`);
 
   try {
+      const daysToProject = Math.min(Math.max(Number(body.days || 30), 14), 90);
+
       // --- DATA GATHERING (Parallelized for Performance) ---
-      const [accountsRes, totalsRes, transRes, billsRes, topCatsRes, upcomingObligationsRes, historyRes, futurePayablesRes, futureReceivablesRes] = await Promise.all([
+      const [
+          accountsRes,
+          totalsRes,
+          transRes,
+          billsRes,
+          topCatsRes,
+          upcomingObligationsRes,
+          historyRes,
+          futurePayablesRes,
+          futureReceivablesRes,
+          futureTransRes,
+          recurrencesRes,
+          categoriesRes
+      ] = await Promise.all([
           // Accounts & Balance
           db.query(`
               SELECT a.id, a.name, a.initial_balance,
               (
-                  COALESCE((SELECT SUM(amount) FROM public.transactions WHERE account_id = a.id AND transaction_type = 'Entrada'), 0)
-                  - COALESCE((SELECT SUM(amount) FROM public.transactions WHERE account_id = a.id AND transaction_type = 'Saída'), 0)
-                  + COALESCE((SELECT SUM(amount) FROM public.transactions WHERE to_account_id = a.id AND transaction_type = 'Transferência'), 0)
-                  - COALESCE((SELECT SUM(amount) FROM public.transactions WHERE account_id = a.id AND transaction_type = 'Transferência'), 0)
+                  COALESCE((SELECT SUM(amount) FROM public.transactions WHERE account_id = a.id AND LOWER(transaction_type) IN ('entrada', 'income', 'receita')), 0)
+                  - COALESCE((SELECT SUM(amount) FROM public.transactions WHERE account_id = a.id AND LOWER(transaction_type) IN ('saída', 'saida', 'expense', 'despesa')), 0)
+                  + COALESCE((SELECT SUM(amount) FROM public.transactions WHERE to_account_id = a.id AND LOWER(transaction_type) IN ('transferência', 'transferencia', 'transfer')), 0)
+                  - COALESCE((SELECT SUM(amount) FROM public.transactions WHERE account_id = a.id AND LOWER(transaction_type) IN ('transferência', 'transferencia', 'transfer')), 0)
               ) as net
               FROM public.accounts a WHERE ${queryFilter}
           `, [queryScopeId]),
@@ -140,47 +155,70 @@ export default async function handler(req: any, res: any) {
               SELECT category, SUM(amount) as total
               FROM public.transactions
               WHERE ${queryFilter}
-              AND transaction_type = 'Saída'
+              AND LOWER(transaction_type) IN ('saída', 'saida', 'expense', 'despesa')
               AND date >= $2
               GROUP BY 1 ORDER BY 2 DESC LIMIT 5
           `, [queryScopeId, new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)]),
 
-          // Upcoming Obligations Summary (Next 14 days)
+          // Upcoming Obligations Summary (Next 30 days)
           db.query(`
               SELECT SUM(amount) as total, COUNT(*) as count
               FROM public.payables 
               WHERE ${queryFilter} 
               AND status='open' 
-              AND due_date > CURRENT_DATE AND due_date <= (CURRENT_DATE + INTERVAL '14 days')
+              AND due_date > CURRENT_DATE AND due_date <= (CURRENT_DATE + INTERVAL '30 days')
           `, [queryScopeId]),
 
-          // NEW: Rhythm Analysis (History Last 14 days)
+          // Rhythm Analysis (History Last 30 days)
           db.query(`
               SELECT transaction_type, SUM(amount) as total, COUNT(*) as count
               FROM public.transactions
               WHERE ${queryFilter}
-              AND date >= CURRENT_DATE - INTERVAL '14 days'
+              AND date >= CURRENT_DATE - INTERVAL '30 days'
               GROUP BY 1
           `, [queryScopeId]),
 
-          // NEW: Future Projection - Payables (Next 14 days)
+          // Future Projection - Payables (Next 30 to 90 days)
           db.query(`
               SELECT due_date, amount, title
               FROM public.payables
               WHERE ${queryFilter}
               AND status = 'open'
-              AND due_date > CURRENT_DATE AND due_date <= CURRENT_DATE + INTERVAL '14 days'
+              AND due_date > CURRENT_DATE AND due_date <= CURRENT_DATE + ($2 || ' days')::INTERVAL
               ORDER BY due_date ASC
-          `, [queryScopeId]),
+          `, [queryScopeId, daysToProject]),
 
-          // NEW: Future Projection - Receivables (Next 14 days)
+          // Future Projection - Receivables (Next 30 to 90 days)
           db.query(`
               SELECT due_date, amount, title
               FROM public.receivables
               WHERE ${queryFilter}
               AND status = 'open'
-              AND due_date > CURRENT_DATE AND due_date <= CURRENT_DATE + INTERVAL '14 days'
+              AND due_date > CURRENT_DATE AND due_date <= CURRENT_DATE + ($2 || ' days')::INTERVAL
               ORDER BY due_date ASC
+          `, [queryScopeId, daysToProject]),
+
+          // Future Projection - Scheduled Transactions (Next 30 to 90 days)
+          db.query(`
+              SELECT date, amount, transaction_type, description
+              FROM public.transactions
+              WHERE ${queryFilter}
+              AND date > CURRENT_DATE AND date <= CURRENT_DATE + ($2 || ' days')::INTERVAL
+              ORDER BY date ASC
+          `, [queryScopeId, daysToProject]),
+
+          // Recurrences (Active)
+          db.query(`
+              SELECT label, amount, day_of_month, category
+              FROM public.recurrences
+              WHERE ${queryFilter} AND active = true
+          `, [queryScopeId]),
+
+          // Categories (to check recurrence type)
+          db.query(`
+              SELECT name, type
+              FROM public.categories
+              WHERE ${queryFilter}
           `, [queryScopeId])
       ]);
       
@@ -189,42 +227,76 @@ export default async function handler(req: any, res: any) {
       let income = 0;
       let expense = 0;
       totalsRes.rows.forEach(r => {
-          if (r.transaction_type === 'Entrada') income = Number(r.total);
-          if (r.transaction_type === 'Saída') expense = Number(r.total);
+          const t = String(r.transaction_type || '').toLowerCase();
+          if (['entrada', 'income', 'receita'].includes(t)) income += Number(r.total);
+          if (['saída', 'saida', 'expense', 'despesa'].includes(t)) expense += Number(r.total);
       });
       const todayStr = now.toISOString().split('T')[0];
 
-      // --- NEW: RHYTHM ANALYSIS ---
+      // --- RHYTHM ANALYSIS ---
       let historyIncome = 0;
       let historyExpense = 0;
       historyRes.rows.forEach(r => {
-          if (r.transaction_type === 'Entrada') historyIncome = Number(r.total);
-          if (r.transaction_type === 'Saída') historyExpense = Number(r.total);
+          const t = String(r.transaction_type || '').toLowerCase();
+          if (['entrada', 'income', 'receita'].includes(t)) historyIncome += Number(r.total);
+          if (['saída', 'saida', 'expense', 'despesa'].includes(t)) historyExpense += Number(r.total);
       });
-      const avgDailyExpenseRecent = historyExpense / 14;
+      const avgDailyExpenseRecent = historyExpense / 30;
       const avgDailyExpenseMonth = expense / 30;
       const spendingRhythmStatus = avgDailyExpenseRecent > avgDailyExpenseMonth * 1.2 ? 'Acelerado' : avgDailyExpenseRecent < avgDailyExpenseMonth * 0.8 ? 'Economizando' : 'Normal';
 
-      // --- NEW: DAILY PROJECTION (14 DAYS) ---
+      // --- DAILY PROJECTION (30 to 90 DAYS) ---
+      // Map categories to type
+      const catTypeMap = new Map<string, string>();
+      categoriesRes.rows.forEach(c => {
+          if (c.name) catTypeMap.set(String(c.name).toLowerCase(), c.type);
+      });
+
       const projections = [];
       let runningBalance = totalCash;
       let minBalance = totalCash;
       let minBalanceDate = todayStr;
 
       try {
-          for (let i = 1; i <= 14; i++) {
+          for (let i = 1; i <= daysToProject; i++) {
               const d = new Date(now.getTime() + i * 24 * 60 * 60 * 1000);
               const dStr = d.toISOString().split('T')[0];
+              const dayOfMonth = d.getDate();
               
+              // 1. Receivables
               const dayReceivables = futureReceivablesRes.rows.filter(r => {
                   try { return r.due_date && new Date(r.due_date).toISOString().split('T')[0] === dStr; } catch { return false; }
-              }).reduce((s, r) => s + Number(r.amount), 0);
+              }).reduce((s, r) => s + Number(r.amount || 0), 0);
 
+              // 2. Payables
               const dayPayables = futurePayablesRes.rows.filter(r => {
                   try { return r.due_date && new Date(r.due_date).toISOString().split('T')[0] === dStr; } catch { return false; }
-              }).reduce((s, r) => s + Number(r.amount), 0);
-              
-              runningBalance = runningBalance + dayReceivables - dayPayables;
+              }).reduce((s, r) => s + Number(r.amount || 0), 0);
+
+              // 3. Scheduled Transactions
+              let dayTxIn = 0;
+              let dayTxOut = 0;
+              futureTransRes.rows.filter(t => {
+                  try { return t.date && new Date(t.date).toISOString().split('T')[0] === dStr; } catch { return false; }
+              }).forEach(t => {
+                  const tType = String(t.transaction_type || '').toLowerCase();
+                  if (['entrada', 'income', 'receita'].includes(tType)) dayTxIn += Number(t.amount || 0);
+                  else if (['saída', 'saida', 'expense', 'despesa'].includes(tType)) dayTxOut += Number(t.amount || 0);
+              });
+
+              // 4. Recurrences
+              let dayRecIn = 0;
+              let dayRecOut = 0;
+              recurrencesRes.rows.forEach(rec => {
+                  if (Number(rec.day_of_month) === dayOfMonth) {
+                      const rawCType = catTypeMap.get(String(rec.category || '').toLowerCase()) || 'Saída';
+                      const isRecIncome = ['entrada', 'income', 'receita'].includes(String(rawCType).toLowerCase());
+                      if (isRecIncome) dayRecIn += Number(rec.amount || 0);
+                      else dayRecOut += Number(rec.amount || 0);
+                  }
+              });
+
+              runningBalance = runningBalance + dayReceivables + dayTxIn + dayRecIn - dayPayables - dayTxOut - dayRecOut;
               projections.push({ date: dStr, balance: runningBalance });
               
               if (runningBalance < minBalance) {
@@ -285,13 +357,13 @@ export default async function handler(req: any, res: any) {
           if (coverage >= 2) {
               finalInsights.push({
                   type: 'positive',
-                  message: `Saldo cobre ${coverage.toFixed(1)}x suas contas dos próximos 14 dias. Bom momento para investir!`,
+                  message: `Saldo cobre ${coverage.toFixed(1)}x suas contas dos próximos ${daysToProject} dias. Bom momento para investir!`,
                   icon: 'trend_up'
               });
           } else {
               finalInsights.push({
                   type: 'neutral',
-                  message: `${formatCurrency(upcomingTotal)} em contas nos próximos 14 dias. Saldo atual: ${formatCurrency(totalCash)}.`,
+                  message: `${formatCurrency(upcomingTotal)} em contas nos próximos ${daysToProject} dias. Saldo atual: ${formatCurrency(totalCash)}.`,
                   icon: 'savings'
               });
           }
@@ -350,39 +422,39 @@ export default async function handler(req: any, res: any) {
           if (upcomingTotal > 0) {
               finalInsights.push({
                   type: 'neutral',
-                  message: `${formatCurrency(upcomingTotal)} em contas a pagar nos próximos 14 dias.`,
+                  message: `${formatCurrency(upcomingTotal)} em contas a pagar nos próximos ${daysToProject} dias.`,
                   icon: 'savings'
               });
           } else {
               finalInsights.push({
                   type: 'positive',
-                  message: `Nenhuma conta a pagar nos próximos 14 dias. Bom momento para metas!`,
+                  message: `Nenhuma conta a pagar nos próximos ${daysToProject} dias. Bom momento para metas!`,
                   icon: 'target'
               });
           }
       }
 
-      // --- OPTIONAL AI ENHANCEMENT (bonus, not required) ---
+      // --- OPTIONAL AI ENHANCEMENT (Foundry Azure OpenAI) ---
       try {
-          const aiPrompt = `Você é o "AI Advisor" de finanças. Dê exatamente 1 conselho CURTO (máximo 100 caracteres) e PREDITIVO sobre este cenário:
-- Saldo: ${formatCurrency(totalCash)}
-- Projeção mínima 14 dias: ${formatCurrency(minBalance)} em ${minBalanceDate}
-- Ritmo: ${spendingRhythmStatus} (${formatCurrency(avgDailyExpenseRecent)}/dia)
-- Contas próximas: ${formatCurrency(upcomingTotal)}
-- Top gastos: ${topCategories || 'Nenhum'}
+          const aiPrompt = `Você é o "AI Advisor" de finanças do Gestor Financeiro. Dê exatamente 1 conselho CURTO (máximo 120 caracteres) e PREDITIVO sobre a projeção de ${daysToProject} dias:
+- Saldo Atual: ${formatCurrency(totalCash)}
+- Menor Saldo Previsto (${daysToProject} dias): ${formatCurrency(minBalance)} em ${minBalanceDate}
+- Ritmo de Gastos: ${spendingRhythmStatus} (${formatCurrency(avgDailyExpenseRecent)}/dia)
+- Total de Contas Previstas: ${formatCurrency(upcomingTotal)}
+- Top Categorias de Gastos: ${topCategories || 'Nenhum'}
 
-Responda APENAS com o texto do conselho, sem JSON, sem formatação, sem aspas. Exemplo: "Reduza gastos com alimentação para manter saldo positivo até dia 30."`;
+Responda APENAS com o texto do conselho objetivo, sem JSON, sem formatação, sem aspas. Exemplo: "Reduza gastos variáveis para manter saldo positivo no dia 25."`;
 
           const aiResponse = await askAzureOpenAI({
               messages: [
-                  { role: 'system', content: 'Você é o AI Advisor de finanças. Dê conselhos preditivos curtos, precisos e motivadores.' },
+                  { role: 'system', content: 'Você é o AI Advisor de finanças. Dê conselhos preditivos curtos, precisos e motivadores em português.' },
                   { role: 'user', content: aiPrompt }
               ],
-              maxTokens: 100,
+              maxTokens: 120,
               temperature: 0.3,
           });
           const aiText = aiResponse?.trim().replace(/["`]/g, '');
-          if (aiText && aiText.length > 5 && aiText.length < 200) {
+          if (aiText && aiText.length > 5 && aiText.length < 250) {
               finalInsights.push({ type: 'neutral', message: `✨ ${aiText}`, icon: 'target' });
           }
       } catch (aiErr) {
@@ -392,7 +464,16 @@ Responda APENAS com o texto do conselho, sem JSON, sem formatação, sem aspas. 
       console.log(`[Advisor] Final insights: ${finalInsights.length} items`);
       res.statusCode = 200;
       res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({ insights: finalInsights.slice(0, 3) }));
+      res.end(JSON.stringify({ 
+          insights: finalInsights.slice(0, 4),
+          projectionsSummary: {
+              days: daysToProject,
+              initialBalance: totalCash,
+              minBalance,
+              minBalanceDate,
+              finalBalance: projections[projections.length - 1]?.balance ?? totalCash
+          }
+      }));
 
   } catch (err) {
       console.error('Proactive Insights Error:', err);

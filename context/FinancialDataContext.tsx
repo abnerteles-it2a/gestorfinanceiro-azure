@@ -20,10 +20,22 @@ export interface PlanCapabilities {
 
 // --- INITIAL STATE ---
 const defaultCapabilities: PlanCapabilities = {
-    canAccessInvestments: false,
-    canAccessFinance: false,
-    canAccessDocs: false,
-    canAccessReports: false
+    canAccessInvestments: true,
+    canAccessFinance: true,
+    canAccessDocs: true,
+    canAccessReports: true
+};
+
+const defaultEntitlements: any = {
+    modules: {
+        investments: true,
+        financeAccounting: true,
+        docsVault: true,
+        reports: true,
+        meiMonitoring: true,
+        chatAi: true,
+        corporateManagement: false
+    }
 };
 
 const defaultData: {
@@ -93,6 +105,21 @@ const saveToStorage = (key: string, value: any) => {
 
 
 // --- CONTEXT ---
+export interface SubscriptionInfo {
+    provider?: string; 
+    status?: string; 
+    periodStart?: string | null; 
+    periodEnd?: string | null;
+    billing_period?: 'monthly' | 'yearly' | 'trial';
+    isTrial?: boolean;
+    isExpired?: boolean;
+    isInsideGrace?: boolean;
+    isTotalBlocked?: boolean;
+    isOverQuota?: boolean;
+    gracePeriodDays?: number;
+    trialDaysRemaining?: number;
+}
+
 interface FinancialDataContextType {
     accounts: BankAccount[];
     transactions: Transaction[];
@@ -154,19 +181,7 @@ interface FinancialDataContextType {
     organizationInfo?: { id?: string; name?: string; seats?: number; usedSeats?: number } | null;
     orgRole?: string | null;
     planInfo?: { id?: string; name?: string; tier?: string; seats?: number; limits?: { transactions?: number; storage?: string } } | null;
-    subscriptionInfo?: { 
-        provider?: string; 
-        status?: string; 
-        periodStart?: string | null; 
-        periodEnd?: string | null;
-        billing_period?: 'monthly' | 'yearly' | 'trial';
-        isTrial?: boolean;
-        isExpired?: boolean;
-        isInsideGrace?: boolean;
-        isTotalBlocked?: boolean;
-        isOverQuota?: boolean;
-        gracePeriodDays?: number;
-    } | null;
+    subscriptionInfo?: SubscriptionInfo | null;
     capabilities: PlanCapabilities;
     entitlements?: any;
     usage?: any;
@@ -243,22 +258,11 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
     const [hasMoreTransactions, setHasMoreTransactions] = useState<boolean>(false);
     const [organizationInfo, setOrganizationInfo] = useState<{ id?: string; name?: string; seats?: number; usedSeats?: number } | null>(null);
     const [orgRole, setOrgRole] = useState<string | null>(null);
-    const [planInfo, setPlanInfo] = useState<{ id?: string; name?: string; tier?: string; seats?: number; limits?: { transactions?: number; storage?: string } } | null>(null);
-    const [subscriptionInfo, setSubscriptionInfo] = useState<{ 
-        provider?: string; 
-        status?: string; 
-        periodStart?: string | null; 
-        periodEnd?: string | null;
-        isTrial?: boolean;
-        isExpired?: boolean;
-        isInsideGrace?: boolean;
-        isTotalBlocked?: boolean;
-        isOverQuota?: boolean;
-        gracePeriodDays?: number;
-    } | null>(null);
+    const [planInfo, setPlanInfo] = useState<{ id?: string; name?: string; tier?: string; seats?: number; limits?: { transactions?: number; storage?: string } } | null>(() => loadFromStorage('planInfo', null));
+    const [subscriptionInfo, setSubscriptionInfo] = useState<SubscriptionInfo | null>(() => loadFromStorage('subscriptionInfo', null));
     const [userPreferences, setUserPreferences] = useState<UserPreferences>(() => loadFromStorage('userPreferences', {}));
     const [capabilities, setCapabilities] = useState<PlanCapabilities>(() => loadFromStorage('capabilities', defaultCapabilities));
-    const [entitlements, setEntitlements] = useState<any>(() => loadFromStorage('entitlements', null));
+    const [entitlements, setEntitlements] = useState<any>(() => loadFromStorage('entitlements', defaultEntitlements));
     const [usage, setUsage] = useState<any>(() => loadFromStorage('usage', null));
     const [userProfile, setUserProfile] = useState<{ fullName?: string; document?: string } | null>(null);
     const [aiInsights, setAiInsights] = useState<{ type: 'positive' | 'negative' | 'neutral', message: string, icon: string }[]>([]);
@@ -360,7 +364,7 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
                     shouldFetchLists ? callApi('goals_list') : Promise.resolve(null),
                     shouldFetchLists ? callApi('recurrences_list') : Promise.resolve(null),
                     shouldFetchLists ? callApi('cost_centers_list') : Promise.resolve(null),
-                    callApi('profile_get'),
+                    shouldFetchLists ? callApi('profile_get') : Promise.resolve(null),
                     (dbProvider === 'neon') ? fetch(`/api/bootstrap?userId=${encodeURIComponent(uid)}&t=${Date.now()}`, { headers: await getAuthHeaders() }).then(r => r.ok ? r.json() : null).catch(() => null) : Promise.resolve(null)
                 ]);
 
@@ -368,26 +372,35 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
                     const j = bootRes;
                     if (j.organization) setOrganizationInfo({ id: j.organization.id, name: j.organization.name, seats: Number(j.organization.seats || 0), usedSeats: Number(j.organization.usedSeats ?? 0) });
                     if (j.org_role) setOrgRole(j.org_role);
-                    if (j.plan) setPlanInfo({ 
-                        id: j.plan.id, 
-                        name: j.plan.name, 
-                        tier: j.plan.tier,
-                        seats: j.entitlements?.limits?.users || 1,
-                        limits: j.plan.limits
-                    });
+                    const effectiveTier = (j.status?.tier || j.plan?.tier || 'starter').toLowerCase();
+                    if (j.plan || j.status) {
+                        const pInfo = { 
+                            id: j.plan?.id, 
+                            name: j.plan?.name || (effectiveTier === 'pro' ? 'Pro' : effectiveTier === 'plus' ? 'Plus' : 'Starter'), 
+                            tier: effectiveTier,
+                            seats: j.entitlements?.limits?.users || (effectiveTier === 'pro' ? 2 : 1),
+                            limits: j.plan?.limits
+                        };
+                        setPlanInfo(pInfo);
+                        saveToStorage('planInfo', pInfo);
+                    }
                     if (j.subscription) {
-                        setSubscriptionInfo({ 
+                        const sInfo = { 
                             provider: j.subscription.provider, 
                             status: j.subscription.status, 
                             periodStart: j.subscription.period_start, 
                             periodEnd: j.subscription.period_end,
+                            billing_period: j.subscription.billing_period,
                             isTrial: j.subscription.isTrial,
                             isExpired: j.subscription.isExpired,
                             isInsideGrace: j.subscription.isInsideGrace,
                             isTotalBlocked: j.subscription.isTotalBlocked,
                             isOverQuota: j.subscription.isOverQuota,
-                            gracePeriodDays: j.subscription.gracePeriodDays
-                        });
+                            gracePeriodDays: j.subscription.gracePeriodDays,
+                            trialDaysRemaining: j.subscription.trialDaysRemaining
+                        };
+                        setSubscriptionInfo(sInfo);
+                        saveToStorage('subscriptionInfo', sInfo);
                     }
                     if (j.capabilities) {
                         setCapabilities(j.capabilities);
@@ -623,11 +636,15 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
             setCostCenters([]);
             setHasMoreTransactions(false);
             setCapabilities(defaultCapabilities);
-            setEntitlements(null);
+            setEntitlements(defaultEntitlements);
             setUsage(null);
+            setPlanInfo(null);
+            setSubscriptionInfo(null);
             localStorage.removeItem('gestor_financeiro_capabilities');
             localStorage.removeItem('gestor_financeiro_entitlements');
             localStorage.removeItem('gestor_financeiro_usage');
+            localStorage.removeItem('gestor_financeiro_planInfo');
+            localStorage.removeItem('gestor_financeiro_subscriptionInfo');
         } catch {}
     }, [user]);
 
@@ -1302,21 +1319,34 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
     const accountBalances = useMemo(() => {
         const balances: Record<string, number> = {};
         accounts.forEach(acc => {
-            balances[acc.id] = acc.initialBalance;
+            balances[acc.id] = Number(acc.initialBalance || 0);
         });
 
         [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).forEach(t => {
-            if (balances[t.accountId] !== undefined) {
-                const type = (t.transactionType || '').toLowerCase();
-                if (['entrada', 'income', 'receita'].includes(type)) balances[t.accountId] += t.amount;
-                else if (['saída', 'saida', 'expense', 'despesa'].includes(type)) balances[t.accountId] -= t.amount;
-                else if (['transferência', 'transferencia', 'transfer'].includes(type)) {
-                    balances[t.accountId] -= t.amount;
-                    if (t.toAccountId && balances[t.toAccountId] !== undefined) {
-                        balances[t.toAccountId] += t.amount;
-                    }
+            const amount = Number(t.amount || 0);
+            if (isNaN(amount) || amount === 0) return;
+            const type = (t.transactionType || '').toLowerCase();
+
+            if (['transferência', 'transferencia', 'transfer'].includes(type)) {
+                if (t.accountId && balances[t.accountId] !== undefined) {
+                    balances[t.accountId] -= amount;
+                }
+                if (t.toAccountId && balances[t.toAccountId] !== undefined) {
+                    balances[t.toAccountId] += amount;
+                }
+            } else if (['entrada', 'income', 'receita'].includes(type)) {
+                if (t.accountId && balances[t.accountId] !== undefined) {
+                    balances[t.accountId] += amount;
+                }
+            } else if (['saída', 'saida', 'expense', 'despesa'].includes(type)) {
+                if (t.accountId && balances[t.accountId] !== undefined) {
+                    balances[t.accountId] -= amount;
                 }
             }
+        });
+
+        Object.keys(balances).forEach(id => {
+            balances[id] = Number(balances[id].toFixed(2));
         });
         return balances;
     }, [accounts, transactions]);

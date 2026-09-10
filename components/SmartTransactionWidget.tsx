@@ -10,6 +10,7 @@ import { AddTransactionModal } from './AddTransactionModal';
 import { Modal } from './shared/Modal';
 import { TransactionType } from '../types';
 import { useToast } from '../context/ToastContext';
+import { VoiceRecordButton } from './ui/VoiceRecordButton';
 
 export const SmartTransactionWidget: React.FC = () => {
     const { categories, accounts, addTransaction, transactions, costCenters, addCategory, viewMode } = useFinancialData();
@@ -542,9 +543,10 @@ export const SmartTransactionWidget: React.FC = () => {
         setValidateOpen(false);
     };
 
-    const handleProcess = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!inputText.trim()) return;
+    const handleProcess = async (e?: React.FormEvent, overrideText?: string) => {
+        if (e) e.preventDefault();
+        const textToProcess = (overrideText || inputText).trim();
+        if (!textToProcess) return;
 
         setIsLoading(true);
         
@@ -556,7 +558,7 @@ export const SmartTransactionWidget: React.FC = () => {
             return;
         }
 
-        const lowerText = inputText.toLowerCase();
+        const lowerText = textToProcess.toLowerCase();
         const hasAmountCandidate = (
             /r\$\s*(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?)/i.test(lowerText) ||
             /(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?)\s*reais?/i.test(lowerText) ||
@@ -565,32 +567,30 @@ export const SmartTransactionWidget: React.FC = () => {
         );
 
         let aiTx: any = null;
-        if (provider === 'vertex') {
-            try {
-                const payload = {
-                    kind: 'transaction',
-                    context: {
-                        text: inputText,
-                        today: `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}-${String(new Date().getDate()).padStart(2,'0')}`,
-                        categories: categoryNames,
-                        accounts: accountList,
-                        costCenters: costCenters.map(c => ({ id: c.id, name: c.name }))
-                    }
-                };
-                    const headers: Record<string, string> = { 'content-type': 'application/json' };
-                    if (viewMode) headers['x-view-mode'] = viewMode;
-                    const r = await fetch('/api/ai/advice', { method: 'POST', headers, body: JSON.stringify(payload) });
-                const j = await r.json();
-                if (r.ok && j?.transaction) {
-                    aiTx = j.transaction;
-                    setAiMeta({ provider: j?.provider, model: j?.model });
-                } else {
-                    setAiMeta(null);
+        try {
+            const payload = {
+                kind: 'transaction',
+                context: {
+                    text: textToProcess,
+                    today: `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}-${String(new Date().getDate()).padStart(2,'0')}`,
+                    categories: categoryNames,
+                    accounts: accountList,
+                    costCenters: costCenters.map(c => ({ id: c.id, name: c.name }))
                 }
-            } catch {}
-        }
+            };
+            const headers: Record<string, string> = { 'content-type': 'application/json' };
+            if (viewMode) headers['x-view-mode'] = viewMode;
+            const r = await fetch('/api/ai/advice', { method: 'POST', headers, body: JSON.stringify(payload) });
+            const j = await r.json();
+            if (r.ok && j?.transaction) {
+                aiTx = j.transaction;
+                setAiMeta({ provider: j?.provider || 'gestor_financeiro', model: j?.model || 'Gestor Financeiro Intelligence Engine' });
+            } else {
+                setAiMeta(null);
+            }
+        } catch {}
 
-        const result = aiTx || await parseTransactionFromText(inputText, categoryNames, accountList);
+        const result = aiTx || await parseTransactionFromText(textToProcess, categoryNames, accountList);
 
         if (result) {
             const finalAccountId = result.accountId || (accounts.length > 0 ? accounts[0].id : '');
@@ -635,7 +635,7 @@ export const SmartTransactionWidget: React.FC = () => {
             }
             if (costCenters.length > 0) {
                 const normalize = (s: string) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
-                const lower = normalize(inputText);
+                const lower = normalize(textToProcess);
                 const list = costCenters.map(c => ({ id: c.id, name: c.name, norm: normalize(c.name) }));
                 let ccGuess: { value: string; reason: string } | null = null;
                 const direct = list.find(c => lower.includes(c.norm));
@@ -789,34 +789,45 @@ export const SmartTransactionWidget: React.FC = () => {
                 Digite naturalmente, ex: "Almoço de 45 reais no débito nubank ontem".
                 Para centro de custo, mencione no texto: "no centro pessoal", "cc profissional", ou "centro de custo empresa".
             </p>
-            <form onSubmit={handleProcess} className="relative">
-                <input
-                    type="text"
-                    value={inputText}
-                    onChange={(e) => setInputText(e.target.value)}
-                    placeholder="Descreva sua transação aqui..."
-                    className="w-full pl-4 pr-12 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 transition-shadow placeholder:text-gray-500 dark:placeholder:text-white placeholder:opacity-100"
-                    disabled={isLoading}
-                />
-                {aiMeta?.provider && aiMeta?.model && (
-                    <span className="absolute right-14 top-1/2 -translate-y-1/2 text-[10px] px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 dark:bg-indigo-600/30 dark:text-indigo-200">
-                        {aiMeta.provider === 'vertex_ai' ? 'Vertex AI' : aiMeta.provider} • {aiMeta.model}
-                    </span>
-                )}
-                <button
-                    type="submit"
-                    disabled={isLoading || !inputText}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md transition-colors disabled:bg-gray-400"
-                >
-                    {isLoading ? (
-                        <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                    ) : (
-                        <PlusIcon className="h-5 w-5" />
+            <form onSubmit={handleProcess} className="relative flex items-center gap-2">
+                <div className="relative flex-1">
+                    <input
+                        type="text"
+                        value={inputText}
+                        onChange={(e) => setInputText(e.target.value)}
+                        placeholder="Descreva ou dite sua transação..."
+                        className="w-full pl-4 pr-12 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 transition-shadow placeholder:text-gray-500 dark:placeholder:text-white placeholder:opacity-100"
+                        disabled={isLoading}
+                    />
+                    {aiMeta?.provider && aiMeta?.model && (
+                        <span className="absolute right-14 top-1/2 -translate-y-1/2 text-[10px] px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 dark:bg-indigo-600/30 dark:text-indigo-200 hidden sm:inline-block">
+                            {aiMeta.provider} • {aiMeta.model}
+                        </span>
                     )}
-                </button>
+                    <button
+                        type="submit"
+                        disabled={isLoading || !inputText}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md transition-colors disabled:bg-gray-400"
+                    >
+                        {isLoading ? (
+                            <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                        ) : (
+                            <PlusIcon className="h-5 w-5" />
+                        )}
+                    </button>
+                </div>
+                <VoiceRecordButton
+                    onSpeechResult={(spokenText) => {
+                        setInputText(spokenText);
+                        handleProcess(undefined, spokenText);
+                    }}
+                    isProcessing={isLoading}
+                    label="Voz"
+                    size="md"
+                />
             </form>
             {quickMode === 'save' && (
                 <div className="mt-2 text-xs rounded px-2 py-1 bg-yellow-100 text-yellow-800 dark:bg-yellow-600/30 dark:text-yellow-300">

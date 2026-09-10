@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
 import { useTransactions, UseTransactionsOptions } from './useTransactions';
-import { Transaction, TransactionType } from '../types';
+import { Transaction } from '../types';
 import { dateKey } from '../utils/formatters';
+import { calculateTransactionEffect } from '../utils/transactionHelpers';
 
 export const useCashFlow = (options: UseTransactionsOptions) => {
     const { transactions: filteredTransactions, allTransactions, accounts } = useTransactions(options);
@@ -19,24 +20,7 @@ export const useCashFlow = (options: UseTransactionsOptions) => {
         const showBalance = searchTerm === '' && startDate === '' && endDate === '';
         const balances: { [key: string]: number } = {};
 
-        const transactionEffect = (transaction: Transaction) => {
-            if (selectedAccount === 'all') {
-                if (transaction.transactionType === TransactionType.INCOME) return transaction.amount;
-                if (transaction.transactionType === TransactionType.EXPENSE) return -transaction.amount;
-                return 0;
-            }
-
-            if (transaction.transactionType === TransactionType.TRANSFER) {
-                if (transaction.accountId === selectedAccount) return -transaction.amount;
-                if (transaction.toAccountId === selectedAccount) return transaction.amount;
-                return 0;
-            }
-
-            if (transaction.accountId !== selectedAccount) return 0;
-            if (transaction.transactionType === TransactionType.INCOME) return transaction.amount;
-            if (transaction.transactionType === TransactionType.EXPENSE) return -transaction.amount;
-            return 0;
-        };
+        const transactionEffect = (transaction: Transaction) => calculateTransactionEffect(transaction, selectedAccount);
 
         const initialTotalBalance = accounts.reduce((sum, account) => sum + (account.initialBalance || 0), 0);
         const startingBalance = selectedAccount === 'all'

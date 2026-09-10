@@ -14,12 +14,13 @@ const DocsVault: React.FC = () => {
   const { organizationInfo, planInfo, viewMode, usage, subscriptionInfo, costCenters } = useFinancialData();
   const tier = String(planInfo?.tier || 'starter').toLowerCase();
   
-  // Use usage directly from context (populated by bootstrap)
-  const storageLimit = usage?.storageLimit || (tier === 'pro' ? 10 * 1024 * 1024 * 1024 : tier === 'plus' ? 1024 * 1024 * 1024 : 100 * 1024 * 1024);
-  const storageUsed = usage?.storageUsed || 0;
   const isTrial = !!subscriptionInfo?.isTrial;
   const isBlocked = !!subscriptionInfo?.isTotalBlocked;
   const isOverQuota = !!subscriptionInfo?.isOverQuota;
+
+  // Use usage directly from context (populated by bootstrap)
+  const storageLimit = usage?.storageLimit || ((tier === 'pro' || isTrial) ? 10 * 1024 * 1024 * 1024 : tier === 'plus' ? 1024 * 1024 * 1024 : 100 * 1024 * 1024);
+  const storageUsed = usage?.storageUsed || 0;
 
   const [isOpen, setIsOpen] = React.useState(false);
   const [file, setFile] = React.useState<File | null>(null);

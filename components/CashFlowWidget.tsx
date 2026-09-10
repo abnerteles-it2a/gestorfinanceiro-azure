@@ -67,8 +67,9 @@ export const CashFlowWidget: React.FC = () => {
         }
     }, [user, viewMode]);
 
+    const [daysToProject, setDaysToProject] = useState<30 | 90>(30);
+
     const projection = useMemo(() => {
-        const daysToProject = 90; // 3 months
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         
@@ -127,7 +128,7 @@ export const CashFlowWidget: React.FC = () => {
         }
 
         return dataPoints;
-    }, [transactions, recurrences, categories, totalBalance, futurePayables, futureReceivables]);
+    }, [transactions, recurrences, categories, totalBalance, futurePayables, futureReceivables, daysToProject]);
 
     const minBalance = Math.min(...projection.map(p => p.balance));
     const maxBalance = Math.max(...projection.map(p => p.balance));
@@ -136,17 +137,45 @@ export const CashFlowWidget: React.FC = () => {
 
     return (
         <div className="bg-white/70 dark:bg-slate-800/50 backdrop-blur-sm p-5 lg:p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700/50 h-full flex flex-col">
-            <div className="flex justify-between items-start mb-6">
+            <div className="flex flex-wrap justify-between items-start gap-3 mb-6">
                 <div>
                     <h3 className="text-display-xs text-slate-800 dark:text-white font-bold tracking-tight">
-                        Fluxo de Caixa Projetado (90 dias)
+                        Fluxo de Caixa Projetado ({daysToProject} dias)
                     </h3>
                     <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-1">
-                        Previsão baseada em saldo atual e recorrências.
+                        Previsão baseada em saldo atual, transações e recorrências.
                     </p>
                 </div>
-                <div className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-widest ${finalBalance >= totalBalance ? 'bg-emerald-50/50 text-emerald-600 border-emerald-200/50 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-rose-50/50 text-rose-600 border-rose-200/50 dark:bg-rose-900/20 dark:text-rose-400'}`}>
-                    {finalBalance >= totalBalance ? 'Tendência de Alta' : 'Tendência de Baixa'}
+                <div className="flex items-center gap-2">
+                    {/* Seletor 30d / 90d */}
+                    <div className="flex items-center bg-slate-100 dark:bg-slate-700/50 p-0.5 rounded-lg border border-slate-200 dark:border-slate-600">
+                        <button
+                            type="button"
+                            onClick={() => setDaysToProject(30)}
+                            className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all ${
+                                daysToProject === 30
+                                    ? 'bg-white dark:bg-slate-800 text-teal-700 dark:text-teal-300 shadow-sm'
+                                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                            }`}
+                        >
+                            30 dias
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setDaysToProject(90)}
+                            className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all ${
+                                daysToProject === 90
+                                    ? 'bg-white dark:bg-slate-800 text-teal-700 dark:text-teal-300 shadow-sm'
+                                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                            }`}
+                        >
+                            90 dias
+                        </button>
+                    </div>
+
+                    <div className={`px-2 py-1 rounded border text-[10px] font-bold uppercase tracking-widest ${finalBalance >= totalBalance ? 'bg-emerald-50/50 text-emerald-600 border-emerald-200/50 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-rose-50/50 text-rose-600 border-rose-200/50 dark:bg-rose-900/20 dark:text-rose-400'}`}>
+                        {finalBalance >= totalBalance ? 'Tendência de Alta' : 'Tendência de Baixa'}
+                    </div>
                 </div>
             </div>
 
@@ -160,7 +189,7 @@ export const CashFlowWidget: React.FC = () => {
                     <div className="text-lg font-bold text-gray-900 dark:text-white">{formatCurrency(totalBalance)}</div>
                 </div>
                 <div className="bg-gray-50 dark:bg-gray-700/50 p-3 rounded-lg">
-                    <div className="text-xs text-gray-500 dark:text-gray-400">Saldo em 90 dias</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">Saldo em {daysToProject} dias</div>
                     <div className={`text-lg font-bold ${finalBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                         {formatCurrency(finalBalance)}
                     </div>

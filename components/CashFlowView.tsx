@@ -5,6 +5,7 @@ import { useCashFlow } from '../hooks/useCashFlow';
 import type { Transaction } from '../types';
 import { TransactionType } from '../types';
 import { formatCurrency, formatDate, dateKey } from '../utils/formatters';
+import { isIncomeTx, isTransferTx } from '../utils/transactionHelpers';
 import { PlusIcon, TrendingUpIcon } from './icons';
 import { ArrowDownIcon, ArrowUpIcon, EditIcon, TrashIcon, SearchIcon, CalendarIcon } from './icons';
 import { StatusTag } from './ui/StatusTag';
@@ -19,8 +20,8 @@ interface CashFlowViewProps {
 const CashFlowTransactionItem: React.FC<{ transaction: Transaction, onEdit: () => void, onDelete: () => void }> = ({ transaction, onEdit, onDelete }) => {
     const { accounts } = useFinancialData();
     const account = accounts.find(a => a.id === transaction.accountId);
-    const isIncome = transaction.transactionType === TransactionType.INCOME;
-    const isTransfer = transaction.transactionType === TransactionType.TRANSFER;
+    const isIncome = isIncomeTx(transaction.transactionType);
+    const isTransfer = isTransferTx(transaction.transactionType);
     const isLargeAmount = transaction.amount >= 1000;
     
     let statusType: 'success' | 'error' | 'warning' = 'warning';

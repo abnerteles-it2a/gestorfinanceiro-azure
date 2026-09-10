@@ -1,6 +1,7 @@
 import React from 'react';
 import { useFinancialData } from '../context/FinancialDataContext';
 import { formatCurrency } from '../utils/formatters';
+import { isIncomeTx, isExpenseTx, isTransferTx, calculateAccountBalances } from '../utils/transactionHelpers';
 import { PayablesList } from './PayablesList';
 import { ReceivablesList } from './ReceivablesList';
 import CashFlowView from './CashFlowView';
@@ -59,8 +60,11 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
     fixedIncomeInvestments, 
     viewMode,
     addCategory,
-    planInfo
+    planInfo,
+    subscriptionInfo
   } = useFinancialData();
+  const isTrialActive = !!(subscriptionInfo?.isTrial && !subscriptionInfo?.isExpired);
+  const isStarterLocked = (planInfo?.tier === 'starter') && !isTrialActive;
   const [snapshotReceivables, setSnapshotReceivables] = React.useState<any[]>([]);
   const [snapshotPayables, setSnapshotPayables] = React.useState<any[]>([]);
   const [selectedMonth, setSelectedMonth] = React.useState(() => new Date().toISOString().slice(0,7));
@@ -148,13 +152,13 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
   const netEquityCalc = React.useMemo(() => totalAssets - totalLiabilities, [totalAssets, totalLiabilities]);
   const monthTx = React.useMemo(() => transactions.filter(t => (t.date || '').slice(0,7) === selectedMonth), [transactions, selectedMonth]);
   
-  const monthIncome = React.useMemo(() => monthTx.filter(t => t.transactionType === 'Entrada').reduce((s, t) => s + Number(t.amount || 0), 0), [monthTx]);
-  const monthExpense = React.useMemo(() => monthTx.filter(t => t.transactionType === 'Saída').reduce((s, t) => s + Number(t.amount || 0), 0), [monthTx]);
+  const monthIncome = React.useMemo(() => monthTx.filter(t => isIncomeTx(t.transactionType)).reduce((s, t) => s + Number(t.amount || 0), 0), [monthTx]);
+  const monthExpense = React.useMemo(() => monthTx.filter(t => isExpenseTx(t.transactionType)).reduce((s, t) => s + Number(t.amount || 0), 0), [monthTx]);
   
   const expenseByCategory = React.useMemo(() => {
     const map: Record<string, number> = {};
     monthTx.forEach(t => {
-      if (t.transactionType !== 'Saída' || (t as any).isInternal) return;
+      if (!isExpenseTx(t.transactionType) || (t as any).isInternal) return;
       const k = String(t.category || 'Outros');
       map[k] = (map[k] || 0) + Number(t.amount || 0);
     });
@@ -164,7 +168,7 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
   const incomeByCategory = React.useMemo(() => {
     const map: Record<string, number> = {};
     monthTx.forEach(t => {
-      if (t.transactionType !== 'Entrada' || (t as any).isInternal) return;
+      if (!isIncomeTx(t.transactionType) || (t as any).isInternal) return;
       const k = String(t.category || 'Outros');
       map[k] = (map[k] || 0) + Number(t.amount || 0);
     });
@@ -196,18 +200,7 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
   }, [expenseByCategory, monthIncome]);
 
   const accountBalances = React.useMemo(() => {
-    const balances: Record<string, number> = {};
-    accounts.forEach(acc => { balances[acc.id] = Number(acc.initialBalance || 0); });
-    [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).forEach(t => {
-      if (balances[t.accountId] === undefined) return;
-      if (t.transactionType === 'Entrada') balances[t.accountId] += Number(t.amount || 0);
-      else if (t.transactionType === 'Saída') balances[t.accountId] -= Number(t.amount || 0);
-      else if (t.transactionType === 'Transferência') {
-        balances[t.accountId] -= Number(t.amount || 0);
-        if (t.toAccountId && balances[t.toAccountId] !== undefined) balances[t.toAccountId] += Number(t.amount || 0);
-      }
-    });
-    return balances;
+    return calculateAccountBalances(accounts, transactions);
   }, [accounts, transactions]);
 
   const payablesOpenTotal = React.useMemo(() => {
@@ -270,8 +263,8 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
       const key = `${cat}|${cc}`;
       let row = rows.find(r => `${r.cat}|${r.cc}` === key);
       if (!row) { row = { group: '', cat, cc, inc: 0, exp: 0, net: 0 }; rows.push(row); }
-      if (t.transactionType === 'Entrada') row.inc += t.amount;
-      else if (t.transactionType === 'Saída') row.exp += t.amount;
+      if (isIncomeTx(t.transactionType)) row.inc += t.amount;
+      else if (isExpenseTx(t.transactionType)) row.exp += t.amount;
       row.net = row.inc - row.exp;
     });
     rows.forEach(r => { r.group = r.inc > 0 && r.exp === 0 ? 'Receitas Totais' : r.exp > 0 && r.inc === 0 ? 'Despesas Totais' : 'Misto'; });
@@ -292,27 +285,27 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
     } catch {}
   };
   return (
-    <div className="space-y-10 animate-fade-in pb-10 px-1">
+    <div className="space-y-5 lg:space-y-6 animate-fade-in pb-6 px-0.5 sm:px-1">
 
       {/* Workbench Toolbar: Alternância de Visão */}
 
-      <div className="flex flex-col gap-6">
-        <div className="bg-slate-100/70 dark:bg-slate-900/50 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800/80 self-start flex items-center gap-1.5 shadow-sm">
+      <div className="flex flex-col gap-4">
+        <div className="bg-slate-100/80 dark:bg-slate-900/60 p-1 rounded-xl border border-slate-200 dark:border-slate-800/80 self-start flex items-center gap-1 shadow-xs overflow-x-auto max-w-full">
             <button 
                 onClick={() => setTab('cashflow')}
-                className={`px-6 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all ${tab === 'cashflow' ? 'bg-[#2E7D32] text-white shadow-sm ring-1 ring-slate-200/50' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                className={`px-3.5 sm:px-5 py-1.5 text-[9.5px] sm:text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap ${tab === 'cashflow' ? 'bg-[#2E7D32] text-white shadow-xs ring-1 ring-slate-200/50' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
             >
                 Fluxo de Caixa
             </button>
             <button 
                 onClick={() => setTab('obligations')}
-                className={`px-6 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all ${tab === 'obligations' ? 'bg-[#1565C0] text-white shadow-sm ring-1 ring-slate-200/50' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                className={`px-3.5 sm:px-5 py-1.5 text-[9.5px] sm:text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap ${tab === 'obligations' ? 'bg-[#1565C0] text-white shadow-xs ring-1 ring-slate-200/50' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
             >
                 Contas a Pagar e Receber
             </button>
             <button 
                 onClick={() => setTab('accounting')}
-                className={`px-6 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all ${tab === 'accounting' ? 'bg-[#0097A7] text-white shadow-sm ring-1 ring-slate-200/50' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                className={`px-3.5 sm:px-5 py-1.5 text-[9.5px] sm:text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap ${tab === 'accounting' ? 'bg-[#0097A7] text-white shadow-xs ring-1 ring-slate-200/50' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
             >
                 Visão Contábil
             </button>
@@ -324,7 +317,7 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
           </div>
         )}
         {tab === 'obligations' && (
-          planInfo?.tier === 'starter' ? (
+          isStarterLocked ? (
             <UpgradeScreen
               title="Contas a Pagar e Receber"
               description="Gerencie seus compromissos financeiros e previsões de receitas. Tenha controle total de vencimentos, fluxo de caixa futuro projetado e conciliação de parcelas."
@@ -374,7 +367,7 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
         )}
 
         {tab === 'accounting' && (
-          planInfo?.tier === 'starter' ? (
+          isStarterLocked ? (
             <UpgradeScreen
               title="Visão Contábil (DRE & Balanço)"
               description="Acesse demonstrativos de resultados contábeis completos, margens operacionais de lucro, EBITDA e Balanço Patrimonial automatizados."
@@ -420,8 +413,8 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
 
               {/* DRE Tab */}
               {accountingTab === 'dre' && (
-                <div className="space-y-10 focus:outline-none animate-fade-in">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="space-y-4 sm:space-y-5 focus:outline-none animate-fade-in">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                     <KpiCard 
                       title="Receitas Brutas" 
                       value={formatCurrency(monthIncome)} 
@@ -448,7 +441,7 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
                     {/* Receitas Breakdown */}
                     <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
                       <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50">
@@ -578,8 +571,8 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
 
             {/* Balanço Patrimonial Tab */}
             {accountingTab === 'balanco' && (
-              <div className="space-y-10 focus:outline-none animate-fade-in">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="space-y-4 sm:space-y-5 focus:outline-none animate-fade-in">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                   <KpiCard 
                     title="Total Ativos" 
                     value={formatCurrency(totalAssets)} 

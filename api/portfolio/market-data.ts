@@ -39,6 +39,7 @@ export interface MarketItem {
   fiftyTwoWeekLow?: number;
   shortName?: string;
   longName?: string;
+  currency?: string;
   updatedAt: string;
   valuation: {
     recommendation: 'COMPRA_FORTE' | 'COMPRA' | 'MANTER' | 'AGUARDAR' | 'DESCONHECIDO';
@@ -86,6 +87,11 @@ export function detectAssetClass(ticker: string): AssetClass {
   }
   if (['USD', 'EUR', 'USDBRL', 'EURBRL'].includes(t)) {
     return 'CURRENCY';
+  }
+  // US REITs list (Valuation via P/FFO & Spread, not Graham)
+  const usReits = ['O', 'VNQ', 'AMT', 'PLD', 'CCI', 'EQIX', 'PSA', 'SPG', 'DLR', 'WELL', 'AVB', 'EQR', 'STAG', 'MPW', 'AGNC', 'NLY', 'VICI'];
+  if (usReits.includes(t)) {
+    return 'FII';
   }
   const broadEtfs = ['BOVA11', 'SMAL11', 'IVVB11', 'HASH11', 'XINA11', 'GOLD11', 'DIVO11', 'BBSD11', 'SPXI11', 'BRAX11'];
   if (t.endsWith('11') && !broadEtfs.includes(t)) {
@@ -299,10 +305,12 @@ function calculateSpecializedValuation(
   };
 }
 
-// Fetch single ticker from Yahoo v8 Chart API
-async function fetchYahooV8(ticker: string): Promise<{ price: number; change: number; changePercent: number; shortName?: string; high52w?: number } | null> {
+// Fetch single ticker from Yahoo v8 Chart API (supports B3 and US Stocks/REITs)
+async function fetchYahooV8(ticker: string): Promise<{ price: number; change: number; changePercent: number; shortName?: string; high52w?: number; currency?: string } | null> {
   try {
-    const sym = ticker.toUpperCase().endsWith('.SA') ? ticker.toUpperCase() : `${ticker.toUpperCase()}.SA`;
+    const t = ticker.toUpperCase().trim();
+    const isB3 = /\d{1,2}$/.test(t) || t.endsWith('.SA');
+    const sym = isB3 ? (t.endsWith('.SA') ? t : `${t}.SA`) : t;
     const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1d`;
     const raw = await httpGet(url, {}, 6000);
     const json = JSON.parse(raw);
@@ -318,6 +326,7 @@ async function fetchYahooV8(ticker: string): Promise<{ price: number; change: nu
         changePercent: Math.round(changePercent * 100) / 100,
         shortName: meta.shortName || meta.symbol || ticker,
         high52w: meta.fiftyTwoWeekHigh || undefined,
+        currency: meta.currency || (isB3 ? 'BRL' : 'USD'),
       };
     }
   } catch (err: any) {
@@ -494,10 +503,15 @@ export default async function handler(req: any, res: any) {
       let brapiData: any = {};
 
       try {
-        const tokenQuery = process.env.BRAPI_TOKEN ? `?token=${encodeURIComponent(process.env.BRAPI_TOKEN)}&fundamental=true&dividends=true` : '';
-        const rawBrapi = await httpGet(`https://brapi.dev/api/quote/${ticker}${tokenQuery}`, {}, 4000);
-        const bJson = JSON.parse(rawBrapi);
-        if (Array.isArray(bJson.results) && bJson.results[0]) {
+        const token = process.env.BRAPI_TOKEN || 'nywRh48qY7qMZ2aPjBARn1';
+        let rawBrapi = await httpGet(`https://brapi.dev/api/quote/${encodeURIComponent(ticker)}?token=${encodeURIComponent(token)}&fundamental=true`, {}, 4000);
+        let bJson: any = null;
+        try { bJson = JSON.parse(rawBrapi); } catch {}
+        if (!bJson?.results?.[0]) {
+          rawBrapi = await httpGet(`https://brapi.dev/api/quote/${encodeURIComponent(ticker)}?token=${encodeURIComponent(token)}`, {}, 4000);
+          try { bJson = JSON.parse(rawBrapi); } catch {}
+        }
+        if (Array.isArray(bJson?.results) && bJson.results[0]) {
           brapiData = bJson.results[0];
           if (!quote && brapiData.regularMarketPrice > 0) {
             quote = {
@@ -505,7 +519,8 @@ export default async function handler(req: any, res: any) {
               change: Number(brapiData.regularMarketChange || 0),
               changePercent: Number(brapiData.regularMarketChangePercent || 0),
               shortName: brapiData.shortName,
-              high52w: brapiData.fiftyTwoWeekHigh
+              high52w: brapiData.fiftyTwoWeekHigh,
+              currency: brapiData.currency || 'BRL'
             };
           }
         }
@@ -518,6 +533,7 @@ export default async function handler(req: any, res: any) {
           price: quote.price,
           change: quote.change,
           changePercent: quote.changePercent,
+          currency: quote.currency || brapiData.currency || 'BRL',
           assetClass: aClass,
           signal: val.signal || 'Manter',
           decision: val.decision || 'MANTER',

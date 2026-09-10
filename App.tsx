@@ -46,9 +46,9 @@ const SidebarNav: React.FC<{ collapsed: boolean; setCollapsed: (v: boolean) => v
     const invCount = investments.length + fixedIncomeInvestments.length;
     const insightsCount = getInsights().length;
 
-    const canInvestments = entitlements?.modules?.investments ?? capabilities?.canAccessInvestments;
-    const canFinanceAccounting = entitlements?.modules?.financeAccounting ?? capabilities?.canAccessFinance;
-    const canDocsVault = entitlements?.modules?.docsVault ?? capabilities?.canAccessDocs;
+    const canInvestments = entitlements?.modules?.investments ?? capabilities?.canAccessInvestments ?? true;
+    const canFinanceAccounting = entitlements?.modules?.financeAccounting ?? capabilities?.canAccessFinance ?? true;
+    const canDocsVault = entitlements?.modules?.docsVault ?? capabilities?.canAccessDocs ?? true;
     
     const navBtnClass = (view: ActiveView) => {
         if (collapsed) return `omie-sidebar-item`;
@@ -188,7 +188,7 @@ const AppContent: React.FC = () => {
 
     useEffect(() => {
         const canInvestments = entitlements?.modules?.investments ?? capabilities?.canAccessInvestments;
-        if (activeView === 'investments' && !canInvestments) {
+        if (activeView === 'investments' && canInvestments === false) {
             setActiveView('financeAccounting');
             showToast('Investimentos ficam disponíveis apenas no modo Pessoal.', 'info');
         }
@@ -242,8 +242,8 @@ const AppContent: React.FC = () => {
         setActiveView(newView);
     };
 
-    const canInvestments = entitlements?.modules?.investments ?? capabilities?.canAccessInvestments;
-    const canFinanceAccounting = entitlements?.modules?.financeAccounting ?? capabilities?.canAccessFinance;
+    const canInvestments = entitlements?.modules?.investments ?? capabilities?.canAccessInvestments ?? true;
+    const canFinanceAccounting = entitlements?.modules?.financeAccounting ?? capabilities?.canAccessFinance ?? true;
 
     const showTopbarIdentity = activeView === 'home' || sidebarCollapsed;
 
@@ -362,6 +362,18 @@ const AppContent: React.FC = () => {
         return () => { window.removeEventListener('openSettingsModal', handler as EventListener); };
     }, [user, activeView, returnView]);
 
+    React.useEffect(() => {
+        const handler = (e: Event) => {
+            const ce = e as CustomEvent;
+            const detail = (ce && ce.detail) || {};
+            if (detail.view) {
+                handleSetActiveView(detail.view);
+            }
+        };
+        window.addEventListener('gestor_financeiro_navigate', handler as EventListener);
+        return () => { window.removeEventListener('gestor_financeiro_navigate', handler as EventListener); };
+    }, []);
+
     return (
         <div
             className={`${theme === 'dark' ? 'dark' : ''} flex h-screen overflow-hidden bg-spatial`}
@@ -446,25 +458,14 @@ const AppContent: React.FC = () => {
                     </div>
                 </header>
 
-                {/* ── OMIE MODULE TAB BAR (40px) ── */}
-                {user && activeView !== 'home' && (
-                    <div className="omie-module-bar no-print shrink-0">
-                        <div
-                            className="omie-module-tab transition-colors duration-300 shadow-md"
-                            style={{ background: getModuleColor() }}
-                        >
-                            {getTitle()}
-                        </div>
-                    </div>
-                )}
-
-                {/* ── FUNCTIONAL HEADER (banners + actions) ── */}
+                {/* ── FUNCTIONAL HEADER UNIFICADO (48px) ── */}
                 {user && activeView !== 'home' && (
                     <Header
                         activeView={activeView as any}
                         setActiveView={handleSetActiveView as any}
                         onOpenSettings={() => openSettings()}
                         onUpgrade={handleOpenCheckout}
+                        moduleTitle={getTitle()}
                         hideBar={false}
                     />
                 )}
@@ -473,7 +474,7 @@ const AppContent: React.FC = () => {
                 <main className={`flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar ${
                     activeView === 'home'
                         ? 'p-0 relative bg-transparent'
-                        : 'p-3 sm:p-4 md:p-5 lg:p-6 xl:p-8 2xl:p-10 pb-24 md:pb-6 bg-omie-bg dark:bg-slate-950'
+                        : 'p-3 sm:p-4 lg:p-5 xl:p-6 2xl:p-8 pb-20 md:pb-6 bg-omie-bg dark:bg-slate-950'
                 }`}>
                     {activeView === 'home' && user && (
                         <HomeModule

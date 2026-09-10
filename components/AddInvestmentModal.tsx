@@ -9,6 +9,8 @@ import { formatInputMoney, toNumberPtBr } from '../utils/formatters';
 import { FormField } from './ui/Forms/FormField';
 import { Input } from './ui/Forms/Input';
 import { Select } from './ui/Forms/Select';
+import { VoiceRecordButton } from './ui/VoiceRecordButton';
+import { SparklesIcon } from './icons';
 
 interface AddInvestmentModalProps {
     isOpen: boolean;
@@ -72,6 +74,63 @@ export const AddInvestmentModal: React.FC<AddInvestmentModalProps> = ({ isOpen, 
         setTxCategory('');
         setPaymentMethod('Transferência Bancária');
         setCostCenterId('');
+    };
+
+    const [isVoiceProcessing, setIsVoiceProcessing] = useState(false);
+
+    const handleVoiceInvestment = async (speechText: string) => {
+        if (!speechText || speechText.trim().length < 2) return;
+        setIsVoiceProcessing(true);
+        try {
+            const res = await fetch('/api/ai/advice', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    kind: 'investment_transaction',
+                    question: speechText,
+                    context: {
+                        today: new Date().toISOString().split('T')[0],
+                        accounts: accounts.map(a => ({ id: a.id, name: a.name }))
+                    }
+                })
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                const inv = data?.investment;
+                if (inv) {
+                    if (inv.assetType) {
+                        const matchedType = Object.values(AssetType).find(
+                            t => t.toLowerCase() === String(inv.assetType).toLowerCase()
+                        );
+                        if (matchedType) setType(matchedType);
+                        else if (/fii|imobili/i.test(inv.assetType)) setType(AssetType.REAL_ESTATE_FUND);
+                        else if (/cripto/i.test(inv.assetType)) setType(AssetType.CRYPTO);
+                        else if (/renda fixa|cdb|lci|lca|tesouro/i.test(inv.assetType)) setType(AssetType.FIXED_INCOME);
+                        else setType(AssetType.STOCK);
+                    }
+
+                    if (inv.operation) {
+                        setOp(inv.operation as any);
+                    }
+
+                    if (inv.ticker) setTicker(inv.ticker);
+                    if (inv.name) setName(inv.name);
+                    if (inv.issuer) setIssuer(inv.issuer);
+                    if (inv.quantity) setQuantity(String(inv.quantity));
+                    if (inv.purchasePrice) setPurchasePrice(formatInputMoney(String(Math.round(inv.purchasePrice * 100))));
+                    if (inv.amountInvested) setAmountInvested(formatInputMoney(String(Math.round(inv.amountInvested * 100))));
+                    if (inv.yieldRate) setYieldRate(inv.yieldRate);
+                    if (inv.maturityDate) setMaturityDate(inv.maturityDate);
+                    if (inv.date) setPurchaseDate(inv.date);
+                    if (inv.paymentMethod) setPaymentMethod(inv.paymentMethod);
+                }
+            }
+        } catch (err) {
+            console.error("Voice investment parse error:", err);
+        } finally {
+            setIsVoiceProcessing(false);
+        }
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -297,12 +356,31 @@ export const AddInvestmentModal: React.FC<AddInvestmentModalProps> = ({ isOpen, 
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} title="Novo Investimento" size="lg" footer={footer}>
-            <div className="flex justify-end mb-2">
+            <div className="flex items-center justify-between mb-4">
+                {/* Lançamento por Voz com IA */}
+                <div className="flex-1 flex items-center justify-between bg-indigo-50 dark:bg-indigo-950/30 p-2.5 rounded-xl border border-indigo-200 dark:border-indigo-800/50 mr-3">
+                    <div className="flex flex-col">
+                        <span className="text-xs font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-1.5">
+                            <SparklesIcon className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                            Comando de Investimento por Voz
+                        </span>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                            Fale a operação (ex: "Comprei 10 cotas de MXRF11 a 10,25")
+                        </span>
+                    </div>
+                    <VoiceRecordButton
+                        onSpeechResult={handleVoiceInvestment}
+                        isProcessing={isVoiceProcessing}
+                        label="Ditar Operação"
+                        size="sm"
+                    />
+                </div>
+
                 {(() => { const c = confidence(); return (
-                    <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded ${c.color}`}>{c.label}</span>
+                    <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded shrink-0 ${c.color}`}>{c.label}</span>
                 ); })()}
             </div>
-            <form id="add-investment-form" onSubmit={handleSubmit} className="space-y-8 p-2">
+            <form id="add-investment-form" onSubmit={handleSubmit} className="space-y-6 p-2">
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <FormField label="Tipo de Ativo">

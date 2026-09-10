@@ -197,9 +197,9 @@ const HomeModule: React.FC<HomeModuleProps> = ({ setActiveView, onOpenSettings, 
   const { user } = useAuth();
   const { entitlements, capabilities, subscriptionInfo, planInfo } = useFinancialData();
 
-  const canInvestments = entitlements?.modules?.investments ?? capabilities?.canAccessInvestments;
-  const canFinanceAccounting = entitlements?.modules?.financeAccounting ?? capabilities?.canAccessFinance;
-  const canDocsVault = entitlements?.modules?.docsVault ?? capabilities?.canAccessDocs;
+  const canInvestments = entitlements?.modules?.investments ?? capabilities?.canAccessInvestments ?? true;
+  const canFinanceAccounting = entitlements?.modules?.financeAccounting ?? capabilities?.canAccessFinance ?? true;
+  const canDocsVault = entitlements?.modules?.docsVault ?? capabilities?.canAccessDocs ?? true;
   const canOrgAdmin = !!entitlements?.modules?.corporateManagement;
 
   const visibleModules = MODULE_DEFS.filter(m => {

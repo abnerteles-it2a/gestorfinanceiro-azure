@@ -29,6 +29,11 @@ interface Message {
         snippet: string;
     }>;
     suggestedQuestions?: string[];
+    action?: {
+        type: 'OPEN_SETTINGS' | 'ADD_TRANSACTION' | 'ADD_INVESTMENT' | 'NAVIGATE';
+        label: string;
+        payload?: Record<string, any>;
+    };
 }
 
 interface HelpChatbotProps {
@@ -45,7 +50,14 @@ export const HelpChatbot: React.FC<HelpChatbotProps> = ({ currentView, variant =
     const [messages, setMessages] = useState<Message[]>([
         {
             role: 'assistant',
-            content: "Olá! Bem-vindo ao Gestor Financeiro. \n\nSou seu assistente virtual e estou aqui para te ajudar a usar o sistema. \n\nVocê pode me perguntar sobre:\n- Como criar categorias\n- Como lançar despesas\n- Como cadastrar contas bancárias\n- E muito mais!\n\nComo posso te ajudar hoje?"
+            content: "Olá! Sou o seu **Concierge IA**, conectado ao **Azure AI Foundry (GPT-4.1)** e ao **Manual Oficial do Sistema**.\n\nEstou à sua disposição para orientar sobre qualquer funcionalidade, analisar seus gastos, contas a pagar/receber, investimentos e guiar você no dia a dia.\n\nComo posso te ajudar agora?",
+            source: 'azure_foundry',
+            model: 'Azure AI Foundry (GPT-4.1)',
+            action: {
+                type: 'OPEN_SETTINGS',
+                label: '🚀 Iniciar Onboarding: Cadastrar Contas',
+                payload: { tab: 'accounts' }
+            }
         }
     ]);
     const [input, setInput] = useState('');
@@ -126,6 +138,26 @@ export const HelpChatbot: React.FC<HelpChatbotProps> = ({ currentView, variant =
         return headers;
     };
 
+    const handleExecuteAction = (action: any) => {
+        if (!action) return;
+        switch (action.type) {
+            case 'OPEN_SETTINGS':
+                window.dispatchEvent(new CustomEvent('openSettingsModal', { detail: { tab: action.payload?.tab || 'general' } }));
+                break;
+            case 'ADD_TRANSACTION':
+                window.dispatchEvent(new CustomEvent('gestor_financeiro_add_tx', { detail: action.payload || {} }));
+                break;
+            case 'ADD_INVESTMENT':
+                window.dispatchEvent(new CustomEvent('gestor_financeiro_add_investment', { detail: action.payload || {} }));
+                break;
+            case 'NAVIGATE':
+                if (action.payload?.view) {
+                    window.dispatchEvent(new CustomEvent('gestor_financeiro_navigate', { detail: { view: action.payload.view } }));
+                }
+                break;
+        }
+    };
+
     const handleSendMessage = async (textOverride?: string) => {
         const textToSend = textOverride || input;
         if (!textToSend.trim()) return;
@@ -150,7 +182,8 @@ export const HelpChatbot: React.FC<HelpChatbotProps> = ({ currentView, variant =
                     context: {
                         currentView: currentView || 'unknown',
                         investmentProfile
-                    }
+                    },
+                    history: messages.slice(-6).map(m => ({ role: m.role, content: m.content }))
                 })
             });
 
@@ -209,7 +242,8 @@ export const HelpChatbot: React.FC<HelpChatbotProps> = ({ currentView, variant =
                     source: data.source,
                     model: data.model,
                     searchResults: data.searchResults,
-                    suggestedQuestions: suggestedQuestions
+                    suggestedQuestions: suggestedQuestions,
+                    action: data.action || undefined
                 }]);
             } else {
                 console.error('[Chat] Empty replyText after hygienizer process. Data:', data);
@@ -226,7 +260,9 @@ export const HelpChatbot: React.FC<HelpChatbotProps> = ({ currentView, variant =
     const handleClearChat = () => {
         setMessages([{
             role: 'assistant',
-            content: "Olá! Bem-vindo ao Gestor Financeiro. \n\nSou seu assistente virtual e estou aqui para te ajudar a usar o sistema. \n\nVocê pode me perguntar sobre:\n- Como criar categorias\n- Como lançar despesas\n- Como cadastrar contas bancárias\n- E muito mais!\n\nComo posso te ajudar hoje?"
+            content: "Olá! Sou o seu **Concierge IA**, conectado ao **Azure AI Foundry (GPT-4.1)**.\n\nEstou à sua disposição para analisar seus gastos, saldo em contas, contas a pagar/receber, investimentos e orientar sobre qualquer funcionalidade do Gestor Financeiro.\n\nComo posso te ajudar agora?",
+            source: 'azure_foundry',
+            model: 'Azure AI Foundry (GPT-4.1)'
         }]);
         localStorage.removeItem('gestor_financeiro_chat_history');
     };
@@ -248,8 +284,14 @@ export const HelpChatbot: React.FC<HelpChatbotProps> = ({ currentView, variant =
                                 <SparklesIcon className="h-5 w-5 text-white" />
                             </div>
                             <div>
-                                <h3 className="font-bold text-sm text-slate-50">Concierge IA</h3>
-                                <p className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest">Online</p>
+                                <h3 className="font-bold text-sm text-slate-50 flex items-center gap-1.5">
+                                    Concierge IA
+                                    <span className="text-[9px] font-semibold px-1.5 py-0.5 bg-indigo-500/30 text-indigo-200 border border-indigo-400/30 rounded">Foundry GPT-4.1</span>
+                                </h3>
+                                <p className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest flex items-center gap-1">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                                    Azure AI Online
+                                </p>
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -346,14 +388,32 @@ export const HelpChatbot: React.FC<HelpChatbotProps> = ({ currentView, variant =
                                                     </div>
                                                 )}
 
+                                                {msg.role === 'assistant' && msg.action && (
+                                                    <div className="mt-3.5 pt-2.5 border-t border-slate-100 dark:border-slate-700/60">
+                                                        <button
+                                                            onClick={() => handleExecuteAction(msg.action)}
+                                                            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white text-xs font-bold shadow-md shadow-teal-700/20 hover:shadow-lg transition-all active:scale-95 group cursor-pointer"
+                                                        >
+                                                            <span>{msg.action.label}</span>
+                                                            <span className="group-hover:translate-x-1 transition-transform">→</span>
+                                                        </button>
+                                                    </div>
+                                                )}
+
                                                 {msg.role === 'assistant' && msg.source && (
                                                     <div className="mt-3 flex items-center justify-end">
                                                         <span className={`text-[10px] px-2 py-0.5 rounded border ${
-                                                            msg.source === 'google_vertex_ai' 
-                                                                ? 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800' 
-                                                                : 'bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
+                                                            msg.source === 'azure_foundry' || msg.source === 'azure_openai' || msg.source === 'gestor_financeiro'
+                                                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800 shadow-sm' 
+                                                                : msg.source === 'local_engine'
+                                                                    ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800'
+                                                                    : 'bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
                                                         } flex items-center gap-1 font-bold uppercase`}>
-                                                            {msg.source === 'google_vertex_ai' ? 'IA Google' : 'Motor Local'}
+                                                            {msg.source === 'azure_foundry' || msg.source === 'azure_openai' || msg.source === 'gestor_financeiro'
+                                                                ? '⚡ Azure Foundry GPT-4.1'
+                                                                : msg.source === 'local_engine'
+                                                                    ? 'Motor Local'
+                                                                    : 'Assistente IA'}
                                                         </span>
                                                     </div>
                                                 )}

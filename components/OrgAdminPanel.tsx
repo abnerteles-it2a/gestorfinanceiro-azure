@@ -24,8 +24,9 @@ export const OrgAdminPanel: React.FC = () => {
     const { showToast } = useToast();
 
     const tier = String(planInfo?.tier || 'starter').toLowerCase();
+    const isTrialActive = !!(subscriptionInfo?.isTrial && !subscriptionInfo?.isExpired);
 
-    if (tier !== 'pro') {
+    if (tier !== 'pro' && !isTrialActive) {
         return (
             <UpgradeScreen 
                 title="Gestão Corporativa"
@@ -363,8 +364,8 @@ export const OrgAdminPanel: React.FC = () => {
                         <>
                             <button 
                                 onClick={() => setCreateMemberModalOpen(true)}
-                                disabled={isFull || subscriptionInfo?.isTrial}
-                                title={subscriptionInfo?.isTrial ? 'Recurso desbloqueado apenas após a assinatura efetiva do plano Pro.' : undefined}
+                                disabled={isFull}
+                                title={isFull ? 'Limite de assentos atingido' : undefined}
                                 className="inline-flex items-center gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-wider bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 rounded-xl transition-all shadow-sm shadow-slate-100 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <PlusIcon className="h-4 w-4 text-emerald-500" />
@@ -372,8 +373,8 @@ export const OrgAdminPanel: React.FC = () => {
                             </button>
                             <button 
                                 onClick={() => setInviteModalOpen(true)}
-                                disabled={isFull || subscriptionInfo?.isTrial}
-                                title={subscriptionInfo?.isTrial ? 'Recurso desbloqueado apenas após a assinatura efetiva do plano Pro.' : undefined}
+                                disabled={isFull}
+                                title={isFull ? 'Limite de assentos atingido' : undefined}
                                 className="inline-flex items-center gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-all shadow-sm shadow-indigo-200 dark:shadow-none disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <PaperAirplaneIcon className="h-4 w-4" />

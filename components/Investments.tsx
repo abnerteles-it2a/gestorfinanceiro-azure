@@ -556,12 +556,14 @@ const Investments: React.FC<InvestmentsProps> = ({ onEditInvestment }) => {
         isMarketLoading = false,
         refreshMarketData = async () => undefined,
         usage,
-        planInfo
+        planInfo,
+        subscriptionInfo
     } = useFinancialData();
 
     const tier = String(planInfo?.tier || 'starter').toLowerCase();
+    const isTrialActive = !!(subscriptionInfo?.isTrial && !subscriptionInfo?.isExpired);
 
-    if (tier === 'starter') {
+    if (tier === 'starter' && !isTrialActive) {
         return (
             <UpgradeScreen 
                 title="Gestão de Investimentos"

@@ -17,8 +17,8 @@ export const InvestmentSimulator: React.FC = () => {
     const [simulationResult, setSimulationResult] = useState<string | null>(null);
     const [fetchingQuote, setFetchingQuote] = useState(false);
 
-    // Common B3 suggestions
-    const suggestions = ['PETR4', 'VALE3', 'ITUB4', 'BBAS3', 'MXRF11', 'HGLG11', 'XPML11', 'BTC'];
+    // Common suggestions (B3, Crypto, US Stocks & REITs)
+    const suggestions = ['PETR4', 'VALE3', 'ITUB4', 'BBAS3', 'MXRF11', 'HGLG11', 'BTC', 'AAPL', 'O'];
 
     // Fetch quote on ticker change
     useEffect(() => {
@@ -171,7 +171,9 @@ export const InvestmentSimulator: React.FC = () => {
 
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Valor do Aporte (R$)</label>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">
+                                Valor do Aporte ({activeQuote?.currency === 'USD' ? 'US$' : 'R$'})
+                            </label>
                             <input 
                                 type="number"
                                 value={amount || ''}
@@ -182,7 +184,9 @@ export const InvestmentSimulator: React.FC = () => {
                         </div>
 
                         <div>
-                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Cotação Atual (R$)</label>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">
+                                Cotação Atual ({activeQuote?.currency === 'USD' ? 'US$' : 'R$'})
+                            </label>
                             <input 
                                 type="number"
                                 step="0.01"

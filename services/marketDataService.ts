@@ -26,6 +26,7 @@ export interface MarketInfo {
     fiftyTwoWeekLow?: number;
     shortName?: string;
     longName?: string;
+    currency?: string;
     assetClass?: 'STOCK' | 'FII' | 'CRYPTO' | 'CURRENCY' | 'OTHER';
     fiiCeilingPrice?: number;
     fiiMargin?: number;
