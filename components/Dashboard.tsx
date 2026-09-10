@@ -22,6 +22,7 @@ import { ExpenseByCategoryChart } from './ExpenseByCategoryChart';
 import { CategoryBudgetsWidget } from './CategoryBudgetsWidget';
 import { AccountBalancesWidget } from './AccountBalancesWidget';
 import { RecentTransactionsWidget } from './RecentTransactionsWidget';
+import { PredictiveInsightsWidget } from './PredictiveInsightsWidget';
 
 const Dashboard: React.FC = () => {
     const { totalBalance, netWorth, transactions, accounts, categories, isPrivacyMode, investments, planInfo, organizationInfo, isMei, capabilities, viewMode } = useFinancialData();
@@ -262,6 +263,9 @@ const Dashboard: React.FC = () => {
                     <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">Visão Geral</h2>
                 </div>
             </div>
+
+            {/* Predictive AI Insights Card */}
+            <PredictiveInsightsWidget />
 
             {/* Section: Overview Principal */}
             <section aria-labelledby="overview-title">
