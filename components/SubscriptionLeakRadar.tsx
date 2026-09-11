@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useFinancialData } from '../context/FinancialDataContext';
 import { TransactionType } from '../types';
 import { formatCurrency } from '../utils/formatters';
+import { SparklesIcon } from './icons';
 
 interface DetectedSubscription {
     name: string;
@@ -18,6 +19,8 @@ interface DetectedSubscription {
 export const SubscriptionLeakRadar: React.FC = () => {
     const { transactions } = useFinancialData();
     const [filterType, setFilterType] = useState<'all' | 'leaks' | 'saas_streaming'>('all');
+    const [aiReport, setAiReport] = useState<string | null>(null);
+    const [isGeneratingReport, setIsGeneratingReport] = useState(false);
 
     const analysis = useMemo(() => {
         const expenses = transactions.filter(t => t.transactionType === TransactionType.EXPENSE);
@@ -152,6 +155,40 @@ export const SubscriptionLeakRadar: React.FC = () => {
         ? analysis.totalMonthly * ((Math.pow(1 + monthlyRate, months) - 1) / monthlyRate) 
         : 0;
 
+    const handleGenerateAiReport = async () => {
+        setIsGeneratingReport(true);
+        setAiReport(null);
+        try {
+            const token = window.localStorage.getItem('gestor_financeiro_app_token');
+            const headers: Record<string, string> = { 'content-type': 'application/json' };
+            if (token) headers['authorization'] = `Bearer ${token}`;
+
+            const res = await fetch('/api/ai/advice', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                    kind: 'subscription_optimization',
+                    subscriptions: {
+                        annualProjected: analysis.totalAnnual,
+                        monthlyTotal: analysis.totalMonthly,
+                        items: analysis.items,
+                        leaks: analysis.items.filter(r => r.isFeeOrLeak)
+                    }
+                })
+            });
+            const data = await res.json();
+            if (data.text) {
+                setAiReport(data.text);
+            } else {
+                setAiReport('Não foi possível gerar a auditoria de assinaturas no momento.');
+            }
+        } catch {
+            setAiReport('Erro ao contatar o auditor de eficiência operacional.');
+        } finally {
+            setIsGeneratingReport(false);
+        }
+    };
+
     return (
         <div className="space-y-6">
             {/* Header Radar Banner */}
@@ -172,8 +209,17 @@ export const SubscriptionLeakRadar: React.FC = () => {
                         </p>
                     </div>
 
-                    <div className="flex items-center gap-4 bg-white/5 p-4 rounded-2xl border border-white/10 backdrop-blur-sm shrink-0">
-                        <div>
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 shrink-0">
+                        <button
+                            onClick={handleGenerateAiReport}
+                            disabled={isGeneratingReport}
+                            className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-xs font-black uppercase tracking-wider bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-600 hover:to-cyan-600 text-white shadow-lg shadow-teal-500/20 transition-all active:scale-95 disabled:opacity-50"
+                        >
+                            <SparklesIcon className="w-4 h-4" />
+                            <span>{isGeneratingReport ? 'Auditando Gastos...' : 'Otimizar com IA'}</span>
+                        </button>
+
+                        <div className="bg-white/5 p-4 rounded-2xl border border-white/10 backdrop-blur-sm">
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Dreno Anual Projetado</span>
                             <span className="text-xl sm:text-2xl font-black text-rose-400 tabular-nums">
                                 {formatCurrency(analysis.totalAnnual)}
@@ -185,6 +231,27 @@ export const SubscriptionLeakRadar: React.FC = () => {
                     </div>
                 </div>
             </div>
+
+            {/* AI Optimization Drawer */}
+            {aiReport && (
+                <div className="p-6 rounded-3xl bg-teal-500/10 border border-teal-500/30 text-slate-800 dark:text-slate-100 space-y-4 animate-fadeIn">
+                    <div className="flex items-center justify-between border-b border-teal-500/20 pb-3">
+                        <div className="flex items-center gap-2 text-teal-600 dark:text-teal-400 font-bold text-xs uppercase tracking-wider">
+                            <SparklesIcon className="w-4 h-4" />
+                            <span>Parecer de Redução de Fugas & Roteiro de Negociação</span>
+                        </div>
+                        <button
+                            onClick={() => setAiReport(null)}
+                            className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold uppercase"
+                        >
+                            Fechar
+                        </button>
+                    </div>
+                    <div className="text-xs leading-relaxed whitespace-pre-line font-sans">
+                        {aiReport}
+                    </div>
+                </div>
+            )}
 
             {/* Metric KPI Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

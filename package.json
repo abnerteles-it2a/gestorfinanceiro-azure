@@ -12,7 +12,7 @@
     "build": "npm run build:client && npm run build:server",
     "preview": "vite preview",
     "start": "node dist/server.js",
-    "test": "npx tsx utils/transactionHelpers.test.ts && npx tsx utils/bankStatementParser.test.ts && npx tsx utils/valuationFormulas.test.ts",
+    "test": "npx tsx utils/transactionHelpers.test.ts && npx tsx utils/bankStatementParser.test.ts && npx tsx utils/valuationFormulas.test.ts && npx tsx utils/accountingHealth.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

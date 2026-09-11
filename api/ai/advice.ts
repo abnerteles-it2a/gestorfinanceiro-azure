@@ -333,6 +333,81 @@ Estrutura Obrigatória do Parecer Executivo:
           ],
           temperature: 0.3,
         });
+      } else if (kind === 'cashflow_contingency') {
+        const cfData = input?.cashflow || ctx?.cashflow || {};
+        const days = Number(cfData.daysHorizon || 60);
+        const curBal = Number(cfData.currentBalance || 0);
+        const minBal = Number(cfData.minBalance || 0);
+        const minDate = String(cfData.minBalanceDate || '');
+        const burnRate = Number(cfData.burnRateMonthly || 0);
+        const runway = String(cfData.runwayMonths || '—');
+        const projIn = Number(cfData.totalProjectedInflow || 0);
+        const projOut = Number(cfData.totalProjectedOutflow || 0);
+        const hasDeficit = minBal < 0;
+
+        const prompt = `Você é o Diretor de Tesouraria e Planejamento Financeiro (CFO) do Gestor Financeiro.
+Nunca mencione OpenAI, Azure, GPT ou provedores de nuvem.
+Analise o horizonte preditivo de fluxo de caixa (${days} dias) e elabore um PLANO DE CONTINGÊNCIA & PROTEÇÃO DE LIQUIDEZ objetivo, tático e prioritário.
+
+Dados da Projeção de Caixa:
+- Saldo em Caixa Atual: ${formatCurrency(curBal)}
+- Horizonte Analisado: ${days} dias
+- Menor Saldo Projetado (Vale de Caixa): ${formatCurrency(minBal)} previsto para ${minDate}
+- Queima Mensal Histórica (Burn Rate): ${formatCurrency(burnRate)}/mês
+- Autonomia Financeira (Runway): ${runway} meses
+- Entradas Agendadas no Período: ${formatCurrency(projIn)}
+- Saídas Agendadas + Despesas Recorrentes: ${formatCurrency(projOut)}
+- Situação de Liquidez: ${hasDeficit ? 'ALERTA CRÍTICO: Risco iminente de saldo negativo / insolvência temporária.' : 'EQUILIBRADO: Saldo positivo projetado com folga de liquidez.'}
+
+Estrutura Obrigatória da Resposta (Markdown elegante e direto):
+1. **Diagnóstico Executivo do Vale de Caixa:** Avaliação do ponto de inflexão e risco real de quebra de liquidez no dia ${minDate}.
+2. **Plano de Blindagem Imediata (3 Ações Táticas):** Ações práticas como antecipação seletiva de contas a receber, repactuação de prazos com fornecedores ou contingenciamento de gastos discricionários.
+3. **Recomendação Estratégica de Runway:** Como recompor a reserva operacional de liquidez para atingir pelo menos 6 meses de cobertura segura.`;
+
+        text = await askAzureOpenAI({
+          messages: [
+            { role: 'system', content: 'Você é o Diretor de Tesouraria do Gestor Financeiro. Seja extremamente pragmático, numérico, focado em proteção de caixa e sem enrolação.' },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0.3,
+        });
+      } else if (kind === 'subscription_optimization') {
+        const subData = input?.subscriptions || ctx?.subscriptions || {};
+        const totalAnnual = Number(subData.annualProjected || 0);
+        const totalMonthly = Number(subData.monthlyTotal || 0);
+        const items = Array.isArray(subData.items) ? subData.items : [];
+        const leaks = Array.isArray(subData.leaks) ? subData.leaks : [];
+
+        const itemsList = items.map((s: any) => `- ${s.name} (${s.category}): ${formatCurrency(Number(s.monthlyAmount || 0))}/mês (Anual: ${formatCurrency(Number(s.annualProjected || 0))})${s.driftPct ? ` [Reajuste: +${Number(s.driftPct).toFixed(1)}%]` : ''}`).join('\n');
+        const leaksList = leaks.length > 0 ? leaks.map((l: any) => `- ${l.name}: ${formatCurrency(Number(l.monthlyAmount || 0))}/mês`).join('\n') : 'Nenhum vazamento tarifário detectado.';
+
+        const prompt = `Você é o Auditor de Custos Fixos e Eficiência Operacional do Gestor Financeiro.
+Nunca mencione OpenAI, Azure, GPT ou provedores de nuvem.
+Analise a carteira de assinaturas, serviços recorrentes (SaaS, streaming, telecom) e tarifas bancárias e elabore um PLANO DE REDUÇÃO DE FUGAS DE CAPITAL.
+
+Dados dos Custos Recorrentes:
+- Custo Mensal Total: ${formatCurrency(totalMonthly)}
+- Dreno Anual Projetado: ${formatCurrency(totalAnnual)}
+- Fugas e Tarifas Bancárias Detectadas:
+${leaksList}
+
+- Assinaturas & Serviços Rastreados:
+${itemsList || 'Nenhuma assinatura específica.'}
+
+Estrutura Obrigatória da Resposta (Markdown):
+1. **Auditoria de Desperdícios & Fugas:** Diagnóstico das tarifas bancárias, assinaturas duplicadas ou serviços com reajustes abusivos.
+2. **Potencial de Economia Imediata:** Estimativa de economia mensal e anual aplicando eliminação de tarifas e consolidação de ferramentas.
+3. **Roteiro de Ação & Minuta de Negociação:** 
+   - Ações imediatas de cancelamento (isenção de cesta bancária conforme Resolução Bacen 3.919 - Serviços Essenciais).
+   - Script direto para renegociação de planos de telecom ou SaaS com desconto de fidelidade.`;
+
+        text = await askAzureOpenAI({
+          messages: [
+            { role: 'system', content: 'Você é o Auditor de Custos do Gestor Financeiro. Seja analítico, estratégico e focado em corte de desperdícios.' },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0.3,
+        });
       } else {
         const prompt = `Você é o advisor financeiro do Gestor Financeiro.
 Analise a saúde financeira do usuário no mês atual e forneça:

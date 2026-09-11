@@ -13,6 +13,8 @@ import { useToast } from '../context/ToastContext';
 import { UpgradeScreen } from './UpgradeScreen';
 import { PredictiveCashFlow } from './PredictiveCashFlow';
 import { SubscriptionAuditor } from './SubscriptionAuditor';
+import { AccountingHealthCard } from './AccountingHealthCard';
+import { calculateAccountingHealth } from '../utils/accountingHealth';
 
 interface FinanceAccountingProps {
   activeSubTab: 'cashflow' | 'obligations' | 'accounting';
@@ -245,22 +247,32 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
     
     const debtToEquity = netEquityCalc !== 0 ? (totalLiabilities / netEquityCalc) : 0;
 
-    // Aging Logic
+    // Aging Logic com separação estrita de Inadimplência (<0d) e faixas a vencer
     const getAging = (rows: any[]) => {
       const now = new Date();
-      const buckets = { b30: 0, b60: 0, b90: 0, bPlus: 0 };
+      now.setHours(0, 0, 0, 0);
+      const buckets = { overdue: 0, b30: 0, b60: 0, b90: 0, bPlus: 0, total: 0 };
       rows.forEach(r => {
-        const due = new Date(r.due_date);
-        const diffDays = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+        if (!r.due_date) return;
+        const due = new Date(String(r.due_date).slice(0, 10) + 'T00:00:00');
+        const diffDays = Math.floor((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
         const unpaid = Math.max(0, Number(r.amount || 0) - Number(r.paid_amount || r.received_amount || 0));
-        
-        if (diffDays <= 30) buckets.b30 += unpaid;
+        if (unpaid <= 0) return;
+
+        buckets.total += unpaid;
+        if (diffDays < 0) buckets.overdue += unpaid;
+        else if (diffDays <= 30) buckets.b30 += unpaid;
         else if (diffDays <= 60) buckets.b60 += unpaid;
         else if (diffDays <= 90) buckets.b90 += unpaid;
         else buckets.bPlus += unpaid;
       });
       return buckets;
     };
+
+    const recAging = getAging(snapshotReceivables);
+    const payAging = getAging(snapshotPayables);
+    const recDelinquencyRate = recAging.total > 0 ? (recAging.overdue / recAging.total) * 100 : 0;
+    const payOverdueRate = payAging.total > 0 ? (payAging.overdue / payAging.total) * 100 : 0;
 
     return { 
       currentAssets, 
@@ -271,10 +283,27 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
       immediateLiquidity,
       dryLiquidity,
       debtToEquity,
-      receivablesAging: getAging(snapshotReceivables),
-      payablesAging: getAging(snapshotPayables)
+      receivablesAging: recAging,
+      payablesAging: payAging,
+      recDelinquencyRate,
+      payOverdueRate
     };
   }, [totalBalance, receivablesOpenTotal, variableInvestmentsValue, fixedInvestmentsValue, payablesOpenTotal, totalLiabilities, netEquityCalc, snapshotReceivables, snapshotPayables]);
+
+  const accountingHealth = React.useMemo(() => {
+    return calculateAccountingHealth({
+      totalBalance,
+      currentAssets: balanceMetrics.currentAssets,
+      currentLiabilities: balanceMetrics.currentLiabilities,
+      grossRevenue: monthIncome,
+      grossProfit: dreCalculations.grossProfit,
+      netProfit: dreCalculations.netResult,
+      cogs: dreCalculations.cogs,
+      opex: dreCalculations.opex,
+      receivablesAging: balanceMetrics.receivablesAging,
+      payablesAging: balanceMetrics.payablesAging
+    });
+  }, [totalBalance, balanceMetrics, monthIncome, dreCalculations]);
 
   const variationRows = React.useMemo(() => {
     const rows: { group: string; cat: string; cc: string; inc: number; exp: number; net: number }[] = [];
@@ -472,6 +501,13 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
                 </div>
               </div>
 
+              {/* Autonomous AI Health Card & Co-Pilot */}
+              <AccountingHealthCard
+                health={accountingHealth}
+                onGenerateAiAudit={handleGenerateAiAudit}
+                isGeneratingAudit={isGeneratingAudit}
+              />
+
               {/* DRE Tab */}
               {accountingTab === 'dre' && (
                 <div className="space-y-4 sm:space-y-5 focus:outline-none animate-fade-in">
@@ -591,38 +627,58 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
                       <table className="w-full text-sm text-left">
                         <thead>
                           <tr className="border-b border-slate-100 dark:border-slate-700 bg-slate-50/30 dark:bg-slate-900/10">
-                            <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Conta</th>
-                            <th className="px-6 py-3 text-right text-[10px] font-bold text-slate-400 uppercase tracking-wider">Valor</th>
+                            <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Conta Contábil / Estrutura IFRS</th>
+                            <th className="px-6 py-3 text-right text-[10px] font-bold text-slate-400 uppercase tracking-wider">Valor (R$)</th>
+                            <th className="px-6 py-3 text-right text-[10px] font-bold text-slate-400 uppercase tracking-wider">AV (%)</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50 dark:divide-slate-900/30">
                           <tr>
-                            <td className="px-6 py-3 text-slate-700 dark:text-slate-300 font-semibold">(=) RECEITA BRUTA</td>
+                            <td className="px-6 py-3 text-slate-700 dark:text-slate-300 font-semibold">(=) RECEITA BRUTA OPERACIONAL</td>
                             <td className="px-6 py-3 text-right font-bold text-emerald-600">{formatCurrency(monthIncome)}</td>
+                            <td className="px-6 py-3 text-right text-xs font-bold text-emerald-500">100.0%</td>
                           </tr>
                           <tr>
-                            <td className="px-6 py-3 text-slate-500 dark:text-slate-400 pl-10">(-) Custo dos Serviços/Mercadorias (COGS)</td>
+                            <td className="px-6 py-3 text-slate-500 dark:text-slate-400 pl-10">(-) Custo dos Serviços e Mercadorias (CPV / COGS)</td>
                             <td className="px-6 py-3 text-right font-bold text-rose-400">({formatCurrency(dreCalculations.cogs)})</td>
+                            <td className="px-6 py-3 text-right text-xs font-semibold text-rose-400">
+                              {monthIncome > 0 ? ((dreCalculations.cogs / monthIncome) * 100).toFixed(1) : '0.0'}%
+                            </td>
                           </tr>
                           <tr className="bg-slate-50/50 dark:bg-slate-900/10 font-bold">
-                            <td className="px-6 py-3 text-slate-900 dark:text-white">(=) RESULTADO BRUTO</td>
-                            <td className="px-6 py-3 text-right">{formatCurrency(dreCalculations.grossProfit)}</td>
+                            <td className="px-6 py-3 text-slate-900 dark:text-white">(=) LUCRO BRUTO OPERACIONAL</td>
+                            <td className="px-6 py-3 text-right text-teal-600 dark:text-teal-400 font-black">{formatCurrency(dreCalculations.grossProfit)}</td>
+                            <td className="px-6 py-3 text-right text-xs font-bold text-teal-500">
+                              {monthIncome > 0 ? ((dreCalculations.grossProfit / monthIncome) * 100).toFixed(1) : '0.0'}%
+                            </td>
                           </tr>
                           <tr>
-                            <td className="px-6 py-3 text-slate-500 dark:text-slate-400 pl-10">(-) Despesas Administrativas/Vendas (OPEX)</td>
+                            <td className="px-6 py-3 text-slate-500 dark:text-slate-400 pl-10">(-) Despesas Administrativas, Gerais e Vendas (OPEX / SG&A)</td>
                             <td className="px-6 py-3 text-right font-bold text-rose-400">({formatCurrency(dreCalculations.opex)})</td>
+                            <td className="px-6 py-3 text-right text-xs font-semibold text-rose-400">
+                              {monthIncome > 0 ? ((dreCalculations.opex / monthIncome) * 100).toFixed(1) : '0.0'}%
+                            </td>
                           </tr>
                           <tr className="bg-slate-50/50 dark:bg-slate-900/10 font-bold">
-                            <td className="px-6 py-3 text-slate-900 dark:text-white">(=) EBITDA</td>
-                            <td className="px-6 py-3 text-right text-indigo-600 dark:text-indigo-400">{formatCurrency(dreCalculations.ebitda)}</td>
+                            <td className="px-6 py-3 text-slate-900 dark:text-white">(=) RESULTADO OPERACIONAL (EBITDA / LAJIDA)</td>
+                            <td className="px-6 py-3 text-right text-indigo-600 dark:text-indigo-400 font-black">{formatCurrency(dreCalculations.ebitda)}</td>
+                            <td className="px-6 py-3 text-right text-xs font-bold text-indigo-500">
+                              {monthIncome > 0 ? ((dreCalculations.ebitda / monthIncome) * 100).toFixed(1) : '0.0'}%
+                            </td>
                           </tr>
                           <tr>
-                            <td className="px-6 py-3 text-slate-500 dark:text-slate-400 pl-10">(-) Impostos e Taxas</td>
+                            <td className="px-6 py-3 text-slate-500 dark:text-slate-400 pl-10">(-) Impostos e Tributos sobre Atividade</td>
                             <td className="px-6 py-3 text-right font-bold text-rose-400">({formatCurrency(dreCalculations.taxes)})</td>
+                            <td className="px-6 py-3 text-right text-xs font-semibold text-rose-400">
+                              {monthIncome > 0 ? ((dreCalculations.taxes / monthIncome) * 100).toFixed(1) : '0.0'}%
+                            </td>
                           </tr>
                           <tr className="bg-slate-100/50 dark:bg-slate-900/30 font-black text-base border-t-2 border-slate-200 dark:border-slate-700">
                             <td className="px-6 py-4 text-slate-950 dark:text-white">(=) RESULTADO LÍQUIDO DO PERÍODO</td>
-                            <td className="px-6 py-4 text-right text-indigo-650 dark:text-indigo-450">{formatCurrency(dreCalculations.netResult)}</td>
+                            <td className={`px-6 py-4 text-right font-black ${dreCalculations.netResult >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600'}`}>{formatCurrency(dreCalculations.netResult)}</td>
+                            <td className={`px-6 py-4 text-right text-sm font-black ${dreCalculations.netResult >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600'}`}>
+                              {monthIncome > 0 ? ((dreCalculations.netResult / monthIncome) * 100).toFixed(1) : '0.0'}%
+                            </td>
                           </tr>
                         </tbody>
                       </table>
@@ -722,16 +778,29 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
                               <td className="px-6 py-2 text-right font-bold text-emerald-600">{formatCurrency(receivablesOpenTotal)}</td>
                             </tr>
                             {/* Sub-tabela Aging Ativo */}
+                            {balanceMetrics.receivablesAging.overdue > 0 && (
+                              <tr className="text-[11px] bg-rose-500/10 border-l-2 border-rose-500">
+                                <td className="px-14 py-2 font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider flex items-center gap-1">
+                                  <span>⚠️ Vencidas / Inadimplência</span>
+                                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300">
+                                    {balanceMetrics.recDelinquencyRate.toFixed(1)}% do AR
+                                  </span>
+                                </td>
+                                <td className="px-6 py-2 text-right font-black text-rose-600 dark:text-rose-400">
+                                  {formatCurrency(balanceMetrics.receivablesAging.overdue)}
+                                </td>
+                              </tr>
+                            )}
                             <tr className="text-[10px] bg-emerald-50/10">
-                              <td className="px-14 py-2 font-bold text-slate-400 uppercase tracking-wider">Prazo: Até 30 dias</td>
+                              <td className="px-14 py-2 font-bold text-slate-400 uppercase tracking-wider">A Vencer: Até 30 dias</td>
                               <td className="px-6 py-2 text-right font-bold text-emerald-600/80">{formatCurrency(balanceMetrics.receivablesAging.b30)}</td>
                             </tr>
                             <tr className="text-[10px] bg-emerald-50/10">
-                              <td className="px-14 py-2 font-bold text-slate-400 uppercase tracking-wider">Prazo: 31 a 60 dias</td>
+                              <td className="px-14 py-2 font-bold text-slate-400 uppercase tracking-wider">A Vencer: 31 a 60 dias</td>
                               <td className="px-6 py-2 text-right font-bold text-emerald-600/80">{formatCurrency(balanceMetrics.receivablesAging.b60)}</td>
                             </tr>
                             <tr className="text-[10px] bg-emerald-50/10">
-                              <td className="px-14 py-2 font-bold text-slate-400 uppercase tracking-wider">Prazo: Acima de 61 dias</td>
+                              <td className="px-14 py-2 font-bold text-slate-400 uppercase tracking-wider">A Vencer: Acima de 61 dias</td>
                               <td className="px-6 py-2 text-right font-bold text-emerald-600/80">{formatCurrency(balanceMetrics.receivablesAging.b90 + balanceMetrics.receivablesAging.bPlus)}</td>
                             </tr>
                             
@@ -779,16 +848,29 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
                               <td className="px-6 py-2 text-right font-bold text-red-600">{formatCurrency(payablesOpenTotal)}</td>
                             </tr>
                             {/* Sub-tabela Aging Passivo */}
+                            {balanceMetrics.payablesAging.overdue > 0 && (
+                              <tr className="text-[11px] bg-rose-500/10 border-l-2 border-rose-500">
+                                <td className="px-14 py-2 font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider flex items-center gap-1">
+                                  <span>⚠️ Contas Vencidas em Atraso</span>
+                                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300">
+                                    {balanceMetrics.payOverdueRate.toFixed(1)}% do AP
+                                  </span>
+                                </td>
+                                <td className="px-6 py-2 text-right font-black text-rose-600 dark:text-rose-400">
+                                  {formatCurrency(balanceMetrics.payablesAging.overdue)}
+                                </td>
+                              </tr>
+                            )}
                             <tr className="text-[10px] bg-red-50/10">
-                              <td className="px-14 py-2 font-bold text-slate-400 uppercase tracking-wider">Vencimento: Até 30 dias</td>
+                              <td className="px-14 py-2 font-bold text-slate-400 uppercase tracking-wider">A Vencer: Até 30 dias</td>
                               <td className="px-6 py-2 text-right font-bold text-red-600/80">{formatCurrency(balanceMetrics.payablesAging.b30)}</td>
                             </tr>
                             <tr className="text-[10px] bg-red-50/10">
-                              <td className="px-14 py-2 font-bold text-slate-400 uppercase tracking-wider">Vencimento: 31 a 60 dias</td>
+                              <td className="px-14 py-2 font-bold text-slate-400 uppercase tracking-wider">A Vencer: 31 a 60 dias</td>
                               <td className="px-6 py-2 text-right font-bold text-red-600/80">{formatCurrency(balanceMetrics.payablesAging.b60)}</td>
                             </tr>
                             <tr className="text-[10px] bg-red-50/10">
-                              <td className="px-14 py-2 font-bold text-slate-400 uppercase tracking-wider">Vencimento: Acima de 61 dias</td>
+                              <td className="px-14 py-2 font-bold text-slate-400 uppercase tracking-wider">A Vencer: Acima de 61 dias</td>
                               <td className="px-6 py-2 text-right font-bold text-red-600/80">{formatCurrency(balanceMetrics.payablesAging.b90 + balanceMetrics.payablesAging.bPlus)}</td>
                             </tr>
 

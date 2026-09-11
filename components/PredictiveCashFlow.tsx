@@ -23,6 +23,8 @@ export const PredictiveCashFlow: React.FC = () => {
   const [payables, setPayables] = useState<any[]>([]);
   const [receivables, setReceivables] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [aiPlan, setAiPlan] = useState<string | null>(null);
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
 
   React.useEffect(() => {
     async function loadData() {
@@ -125,6 +127,44 @@ export const PredictiveCashFlow: React.FC = () => {
   // Only trigger deficit alert if there are actual outflows that cause balance to drop below reserve
   const hasLiquidityDeficit = totalProjectedOutflow > 0 && (minBalance < 0 || minBalance < safetyReserve);
 
+  const handleGenerateAiPlan = async () => {
+    setIsGeneratingPlan(true);
+    setAiPlan(null);
+    try {
+      const token = window.localStorage.getItem('gestor_financeiro_app_token');
+      const headers: Record<string, string> = { 'content-type': 'application/json' };
+      if (token) headers['authorization'] = `Bearer ${token}`;
+
+      const res = await fetch('/api/ai/advice', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          kind: 'cashflow_contingency',
+          cashflow: {
+            daysHorizon,
+            currentBalance: totalBalance,
+            minBalance,
+            minBalanceDate,
+            burnRateMonthly,
+            runwayMonths,
+            totalProjectedInflow,
+            totalProjectedOutflow,
+          }
+        })
+      });
+      const data = await res.json();
+      if (data.text) {
+        setAiPlan(data.text);
+      } else {
+        setAiPlan('Não foi possível formular o plano de contingência no momento.');
+      }
+    } catch (e: any) {
+      setAiPlan('Erro ao contatar o assistente de tesouraria.');
+    } finally {
+      setIsGeneratingPlan(false);
+    }
+  };
+
   return (
     <div className="bg-white/40 dark:bg-slate-900/40 rounded-3xl p-6 shadow-sm border border-slate-200 dark:border-slate-800 backdrop-blur-sm space-y-6">
       {/* Header */}
@@ -143,34 +183,67 @@ export const PredictiveCashFlow: React.FC = () => {
           </div>
         </div>
 
-        {/* Horizon Switcher */}
-        <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
+        <div className="flex items-center gap-3">
+          {/* Action Button: AI Contingency Plan */}
           <button
-            onClick={() => setDaysHorizon(30)}
-            className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${
-              daysHorizon === 30 ? 'bg-white dark:bg-slate-700 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-400 hover:text-slate-600'
-            }`}
+            onClick={handleGenerateAiPlan}
+            disabled={isGeneratingPlan}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-600 hover:to-cyan-600 text-white shadow-md shadow-teal-500/20 transition-all active:scale-95 disabled:opacity-50"
           >
-            30 Dias
+            <SparklesIcon className="w-3.5 h-3.5" />
+            <span>{isGeneratingPlan ? 'Gerando Plano CFO...' : 'Plano de Caixa com IA'}</span>
           </button>
-          <button
-            onClick={() => setDaysHorizon(60)}
-            className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${
-              daysHorizon === 60 ? 'bg-white dark:bg-slate-700 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-400 hover:text-slate-600'
-            }`}
-          >
-            60 Dias
-          </button>
-          <button
-            onClick={() => setDaysHorizon(90)}
-            className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${
-              daysHorizon === 90 ? 'bg-white dark:bg-slate-700 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-400 hover:text-slate-600'
-            }`}
-          >
-            90 Dias
-          </button>
+
+          {/* Horizon Switcher */}
+          <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
+            <button
+              onClick={() => setDaysHorizon(30)}
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${
+                daysHorizon === 30 ? 'bg-white dark:bg-slate-700 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              30 Dias
+            </button>
+            <button
+              onClick={() => setDaysHorizon(60)}
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${
+                daysHorizon === 60 ? 'bg-white dark:bg-slate-700 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              60 Dias
+            </button>
+            <button
+              onClick={() => setDaysHorizon(90)}
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${
+                daysHorizon === 90 ? 'bg-white dark:bg-slate-700 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              90 Dias
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* AI Contingency Plan Report Drawer */}
+      {aiPlan && (
+        <div className="p-5 rounded-2xl bg-teal-500/10 border border-teal-500/30 text-slate-800 dark:text-slate-100 space-y-3 animate-fadeIn">
+          <div className="flex items-center justify-between border-b border-teal-500/20 pb-3">
+            <div className="flex items-center gap-2 text-teal-600 dark:text-teal-400 font-bold text-xs uppercase tracking-wider">
+              <SparklesIcon className="w-4 h-4" />
+              <span>Plano Tático de Tesouraria & Proteção de Caixa</span>
+            </div>
+            <button
+              onClick={() => setAiPlan(null)}
+              className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold uppercase"
+            >
+              Fechar
+            </button>
+          </div>
+          <div className="text-xs leading-relaxed whitespace-pre-line font-sans">
+            {aiPlan}
+          </div>
+        </div>
+      )}
 
       {/* Liquidity Alert if Cash Valley dips below reserve */}
       {hasLiquidityDeficit && (
