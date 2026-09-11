@@ -38,6 +38,14 @@ export default async function handler(req: any, res: any) {
     json(res, 400, { error: 'missing_required_fields', details: 'Email, senha, nome, organização, plano, assentos e perfil são obrigatórios.' });
     return;
   }
+  if (!email.includes('@') || email.length < 5) {
+    json(res, 400, { error: 'invalid_email', details: 'Por favor, informe um endereço de e-mail válido.' });
+    return;
+  }
+  if (password.length < 8) {
+    json(res, 400, { error: 'weak_password', details: 'A senha deve possuir no mínimo 8 caracteres.' });
+    return;
+  }
   if (!['starter', 'plus', 'pro'].includes(planTier)) {
     json(res, 400, { error: 'tier_unavailable', details: 'Plano inválido selecionado.' });
     return;

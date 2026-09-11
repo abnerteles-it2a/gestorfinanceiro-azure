@@ -1,6 +1,8 @@
 import { parseTransactionFromText } from '../../services/marketDataService';
 import { formatCurrency } from '../../utils/formatters';
 import { askAzureOpenAI, DEFAULT_MODEL_DEPLOYMENT } from './_azure_openai';
+import { verifySession } from '../_auth_shared';
+import { getPool } from '../_db';
 
 export default async function handler(req: any, res: any) {
   try {
@@ -10,6 +12,10 @@ export default async function handler(req: any, res: any) {
       res.end(JSON.stringify({ error: 'method_not_allowed' }));
       return;
     }
+
+    // Require valid authenticated session to protect OpenAI token quota
+    const session = await verifySession(req, res, getPool());
+    if (!session) return; // verifySession sets 401 response
 
     let input: any = {};
     if (req.body && typeof req.body === 'object') {

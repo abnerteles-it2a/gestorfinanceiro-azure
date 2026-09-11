@@ -40,25 +40,27 @@ export default async function handler(req: any, res: any) {
     
     const row = r.rows[0];
     if (!row) { 
-      console.log('Signin: User not found:', email);
-      res.statusCode = 401; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ error: 'invalid_credentials', debug: 'User not found' })); return; 
+      res.statusCode = 401;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ error: 'invalid_credentials', details: 'E-mail ou senha incorretos.' }));
+      return; 
     }
 
     if (row.email_verified === false) {
-      console.log('Signin: Email not verified:', email);
       res.statusCode = 403;
-      res.setHeader('content-type','application/json');
+      res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify({ error: 'email_not_verified', details: 'Por favor, verifique seu e-mail antes de fazer login.' }));
       return;
     }
     
     const bcryptStart = Date.now();
     const ok = await bcrypt.compare(password, row.password_hash);
-    console.log(`[Signin] Bcrypt compare took ${Date.now() - bcryptStart}ms`);
     
     if (!ok) { 
-      console.log('Signin: Password mismatch for:', email);
-      res.statusCode = 401; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ error: 'invalid_credentials', debug: 'Password mismatch' })); return; 
+      res.statusCode = 401;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ error: 'invalid_credentials', details: 'E-mail ou senha incorretos.' }));
+      return; 
     }
     
     const sessionStart = Date.now();

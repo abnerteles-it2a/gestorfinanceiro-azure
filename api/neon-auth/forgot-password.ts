@@ -44,13 +44,17 @@ export default async function handler(req: any, res: any) {
 
     await db.query('UPDATE public.auth_users SET reset_token=$1, reset_token_expires=$2 WHERE id=$3', [token, expires, user.id]);
 
-    // Use APP_URL if available, otherwise try to detect from request headers
+    // Use APP_URL if available, otherwise validate request host against trusted patterns
     let baseUrl = process.env.APP_URL || process.env.VITE_APP_URL || '';
-    if (!baseUrl && req.headers.host) {
-      const protocol = req.headers['x-forwarded-proto'] || 'http';
-      baseUrl = `${protocol}://${req.headers.host}`;
+    if (!baseUrl && req.headers?.host) {
+      const host = String(req.headers.host).trim();
+      const isTrustedHost = /^(localhost|127\.0\.0\.1|.*\.azurecontainerapps\.io|.*\.it2a\.com)(:\d+)?$/i.test(host);
+      if (isTrustedHost) {
+        const protocol = req.headers['x-forwarded-proto'] === 'https' || req.secure ? 'https' : 'http';
+        baseUrl = `${protocol}://${host}`;
+      }
     }
-    if (!baseUrl) baseUrl = 'http://localhost:3000';
+    if (!baseUrl) baseUrl = 'https://ca-gestor-staging.politewave-3dbe78b6.eastus2.azurecontainerapps.io';
 
     const resetLink = `${baseUrl}/reset-password?token=${token}&email=${encodeURIComponent(email)}`;
 

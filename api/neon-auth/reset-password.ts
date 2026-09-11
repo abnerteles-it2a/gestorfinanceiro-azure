@@ -48,12 +48,22 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
+    if (newPassword.length < 8) {
+      res.statusCode = 400;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ error: 'weak_password', details: 'A nova senha deve possuir no mínimo 8 caracteres.' }));
+      return;
+    }
+
     const hash = await bcrypt.hash(newPassword, 10);
     await db.query('UPDATE public.auth_users SET password_hash=$1, reset_token=NULL, reset_token_expires=NULL WHERE id=$2', [hash, user.id]);
+    
+    // Revoke all existing active sessions upon password reset (OWASP Session Management)
+    await db.query('DELETE FROM public.auth_sessions WHERE user_id=$1', [user.id]);
 
     res.statusCode = 200;
     res.setHeader('content-type', 'application/json');
-    res.end(JSON.stringify({ success: true, message: 'Senha alterada com sucesso!' }));
+    res.end(JSON.stringify({ success: true, message: 'Senha alterada com sucesso! Todas as sessões anteriores foram desconectadas.' }));
   } catch (e: any) {
     res.statusCode = 500;
     res.setHeader('content-type', 'application/json');

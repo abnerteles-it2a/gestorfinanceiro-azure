@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -43,6 +44,73 @@ console.log('ASAAS_API_KEY:', checkEnv('ASAAS_API_KEY'));
 console.log('---------------------------------------');
 
 const app = express();
+app.disable('x-powered-by');
+
+// Security Headers Guardrails
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
+
+// CORS Guardrail
+app.use(cors({
+  origin: true,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+}));
+
+// In-Memory Rate Limiting Guardrail (Lightweight, zero-overhead, highly performant)
+const rateLimits = new Map<string, { count: number; resetAt: number }>();
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of rateLimits.entries()) {
+    if (v.resetAt < now) rateLimits.delete(k);
+  }
+}, 60000);
+
+const rateLimiter = (req: any, res: any, next: any) => {
+  const path = req.path || '';
+  if (!path.startsWith('/api')) return next();
+
+  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
+  const now = Date.now();
+  const isAuth = path.includes('/api/neon-auth/');
+  const isAi = path.includes('/api/ai/');
+
+  // Calibrated limits: tight for auth (15/min), comfortable for AI (60/min), generous for general API (300/min)
+  const maxRequests = isAuth ? 15 : (isAi ? 60 : 300);
+  const key = `${ip}:${isAuth ? 'auth' : (isAi ? 'ai' : 'general')}`;
+  
+  let record = rateLimits.get(key);
+  if (!record || record.resetAt < now) {
+    record = { count: 1, resetAt: now + 60000 };
+    rateLimits.set(key, record);
+    return next();
+  }
+
+  record.count += 1;
+  if (record.count > maxRequests) {
+    res.statusCode = 429;
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Retry-After', '60');
+    return res.end(JSON.stringify({
+      error: 'too_many_requests',
+      message: isAuth 
+        ? 'Muitas tentativas de autenticação. Por favor, aguarde 1 minuto.' 
+        : 'Limite de requisições excedido temporariamente. Tente novamente em breve.'
+    }));
+  }
+
+  next();
+};
+app.use(rateLimiter);
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 

@@ -390,7 +390,12 @@ export default async function handler(req: any, res: any) {
     };
 
     if (type === 'raw') {
-        if (isMember) throw new Error('permission_denied_raw');
+        if (process.env.ALLOW_RAW_SQL !== 'true' || isMember) {
+            res.statusCode = 403;
+            res.setHeader('content-type', 'application/json');
+            res.end(JSON.stringify({ error: 'forbidden_operation', details: 'Execução de SQL direto desativada por política de segurança.' }));
+            return;
+        }
         const sql: string = String(input.sql || '');
         const params: any[] = Array.isArray(input.params) ? input.params : [];
         if (!sql) throw new Error('missing sql');
