@@ -120,6 +120,7 @@ export const MarketRankWidget: React.FC<{
     <div
       style={{
         width: 300,
+        height: 385,
         flexShrink: 0,
         background: 'rgba(2,8,26,0.55)',
         backdropFilter: 'blur(20px)',
@@ -133,7 +134,7 @@ export const MarketRankWidget: React.FC<{
       }}
     >
       {/* Header */}
-      <div style={{ padding: '16px 20px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ padding: '16px 20px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ color: 'white', fontSize: 12, fontWeight: 900, letterSpacing: '-0.01em' }}>
             🏆 Top Ativos
@@ -145,7 +146,7 @@ export const MarketRankWidget: React.FC<{
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', padding: '12px 16px 0', gap: 4 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', padding: '12px 16px 0', gap: 4, flexShrink: 0 }}>
         {([
           { id: 'acoes', label: '🇧🇷 Ações' },
           { id: 'fiis', label: '🏢 FIIs' },
@@ -164,9 +165,9 @@ export const MarketRankWidget: React.FC<{
               border: 'none',
               cursor: 'pointer',
               transition: 'all 0.2s',
-              background: activeTab === tab.id ? 'rgba(255,159,28,0.2)' : 'transparent',
-              color: activeTab === tab.id ? '#0D9488' : 'rgba(255,255,255,0.4)',
-              outline: activeTab === tab.id ? '1px solid rgba(255,159,28,0.4)' : '1px solid transparent',
+              background: activeTab === tab.id ? 'rgba(13,148,136,0.2)' : 'transparent',
+              color: activeTab === tab.id ? '#2DD4BF' : 'rgba(255,255,255,0.4)',
+              outline: activeTab === tab.id ? '1px solid rgba(13,148,136,0.4)' : '1px solid transparent',
               textAlign: 'center',
             }}
           >
@@ -175,8 +176,8 @@ export const MarketRankWidget: React.FC<{
         ))}
       </div>
 
-      {/* Ranks list */}
-      <div style={{ flex: 1, padding: '12px 16px' }}>
+      {/* Ranks list with custom scrollbar */}
+      <div className="custom-scrollbar" style={{ flex: 1, padding: '12px 16px', overflowY: 'auto', minHeight: 0 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {activeList.map((item, idx) => {
             const flashKey = `${activeTab}-${item.symbol}`;
@@ -283,7 +284,7 @@ export const MarketRankWidget: React.FC<{
       </div>
 
       {/* CTA Footer */}
-      <div style={{ padding: '0 16px 16px' }}>
+      <div style={{ padding: '0 16px 16px', flexShrink: 0 }}>
         <button
           style={{
             width: '100%',

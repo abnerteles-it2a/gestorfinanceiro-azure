@@ -244,6 +244,7 @@ export const MarketWidget: React.FC<{
     <div
       style={{
         width: 300,
+        height: 385,
         flexShrink: 0,
         background: 'rgba(2,8,26,0.55)',
         backdropFilter: 'blur(20px)',
@@ -257,13 +258,13 @@ export const MarketWidget: React.FC<{
       }}
     >
       {/* Header */}
-      <div style={{ padding: '16px 20px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ padding: '16px 20px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ color: 'white', fontSize: 12, fontWeight: 900, letterSpacing: '-0.01em' }}>
             📊 Mercado
           </span>
           {isPro && (
-            <span style={{ color: '#0D9488', fontSize: 8, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', background: 'rgba(255,159,28,0.15)', padding: '2px 6px', borderRadius: 20, border: '1px solid rgba(255,159,28,0.3)' }}>
+            <span style={{ color: '#2DD4BF', fontSize: 8, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', background: 'rgba(13,148,136,0.18)', padding: '2px 6px', borderRadius: 20, border: '1px solid rgba(13,148,136,0.35)' }}>
               AO VIVO
             </span>
           )}
@@ -276,7 +277,7 @@ export const MarketWidget: React.FC<{
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', padding: '12px 16px 0', gap: 4 }}>
+      <div style={{ display: 'flex', padding: '12px 16px 0', gap: 4, flexShrink: 0 }}>
         {(['market', 'news'] as const).map(tab => (
           <button
             key={tab}
@@ -292,9 +293,9 @@ export const MarketWidget: React.FC<{
               border: 'none',
               cursor: 'pointer',
               transition: 'all 0.2s',
-              background: activeTab === tab ? 'rgba(255,159,28,0.2)' : 'transparent',
-              color: activeTab === tab ? '#0D9488' : 'rgba(255,255,255,0.4)',
-              outline: activeTab === tab ? '1px solid rgba(255,159,28,0.4)' : '1px solid transparent',
+              background: activeTab === tab ? 'rgba(13,148,136,0.2)' : 'transparent',
+              color: activeTab === tab ? '#2DD4BF' : 'rgba(255,255,255,0.4)',
+              outline: activeTab === tab ? '1px solid rgba(13,148,136,0.4)' : '1px solid transparent',
             }}
           >
             {tab === 'market' ? '📈 Cotações' : '📰 Notícias'}
@@ -302,8 +303,8 @@ export const MarketWidget: React.FC<{
         ))}
       </div>
 
-      {/* Content */}
-      <div style={{ flex: 1, padding: '12px 16px' }}>
+      {/* Content with custom scrollbar */}
+      <div className="custom-scrollbar" style={{ flex: 1, padding: '12px 16px', overflowY: 'auto', minHeight: 0 }}>
         {activeTab === 'market' ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {loading ? (
@@ -417,7 +418,7 @@ export const MarketWidget: React.FC<{
       </div>
 
       {/* CTA Footer */}
-      <div style={{ padding: '0 16px 16px' }}>
+      <div style={{ padding: '0 16px 16px', flexShrink: 0 }}>
         <button
           style={{
             width: '100%',
@@ -432,7 +433,7 @@ export const MarketWidget: React.FC<{
             letterSpacing: '0.08em',
             cursor: 'pointer',
             transition: 'all 0.2s',
-            boxShadow: '0 4px 15px rgba(255,159,28,0.3)',
+            boxShadow: '0 4px 15px rgba(13,148,136,0.3)',
           }}
           onClick={isPro ? onGoToDashboard : onUpgrade}
         >
