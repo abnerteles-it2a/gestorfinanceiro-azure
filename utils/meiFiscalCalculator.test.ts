@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
 import { Category, Transaction, TransactionType } from '../types';
 import { calculateMeiFiscal } from './meiFiscalCalculator';
 
@@ -38,9 +39,9 @@ describe('calculateMeiFiscal', () => {
             transaction({ amount: 300, transactionType: TransactionType.TRANSFER, isBusinessRevenue: true, category: 'Transferência' }),
         ]);
 
-        expect(result.annualRevenue).toBe(1_000);
-        expect(result.revenueByActivity.commerce).toBe(1_000);
-        expect(result.revenueByActivity.unclassified).toBe(0);
+        assert.equal(result.annualRevenue, 1_000);
+        assert.equal(result.revenueByActivity.commerce, 1_000);
+        assert.equal(result.revenueByActivity.unclassified, 0);
     });
 
     it('classifica receitas empresariais por atividade e calcula isenção por percentual', () => {
@@ -51,14 +52,12 @@ describe('calculateMeiFiscal', () => {
             transaction({ amount: 4_000, isBusinessRevenue: true, category: 'Fretes' }),
         ]);
 
-        expect(result.revenueByActivity).toMatchObject({
-            commerce: 1_000,
-            industry: 2_000,
-            service: 3_000,
-            transport: 4_000,
-        });
-        expect(result.annualRevenue).toBe(10_000);
-        expect(result.irpfExemptAmount).toBe(1_840);
+        assert.equal(result.revenueByActivity.commerce, 1_000);
+        assert.equal(result.revenueByActivity.industry, 2_000);
+        assert.equal(result.revenueByActivity.service, 3_000);
+        assert.equal(result.revenueByActivity.transport, 4_000);
+        assert.equal(result.annualRevenue, 10_000);
+        assert.equal(result.irpfExemptAmount, 1_840);
     });
 
     it('mantém receita sem atividade no faturamento, mas não presume isenção', () => {
@@ -66,11 +65,11 @@ describe('calculateMeiFiscal', () => {
             transaction({ amount: 1_200, isBusinessRevenue: true, category: 'Receita Avulsa' }),
         ]);
 
-        expect(result.annualRevenue).toBe(1_200);
-        expect(result.revenueByActivity.unclassified).toBe(1_200);
-        expect(result.unclassifiedBusinessRevenueCount).toBe(1);
-        expect(result.unclassifiedBusinessRevenueAmount).toBe(1_200);
-        expect(result.irpfExemptAmount).toBe(0);
+        assert.equal(result.annualRevenue, 1_200);
+        assert.equal(result.revenueByActivity.unclassified, 1_200);
+        assert.equal(result.unclassifiedBusinessRevenueCount, 1);
+        assert.equal(result.unclassifiedBusinessRevenueAmount, 1_200);
+        assert.equal(result.irpfExemptAmount, 0);
     });
 
     it('considera somente despesas empresariais do exercício', () => {
@@ -81,8 +80,8 @@ describe('calculateMeiFiscal', () => {
             transaction({ amount: 300, transactionType: TransactionType.EXPENSE, category: 'Operação', isBusinessExpense: true, date: '2025-12-31' }),
         ]);
 
-        expect(result.businessExpenses).toBe(500);
-        expect(result.grossBusinessProfit).toBe(1_500);
+        assert.equal(result.businessExpenses, 500);
+        assert.equal(result.grossBusinessProfit, 1_500);
     });
 
     it('ignora lançamentos fora do exercício e valores inválidos', () => {
@@ -93,15 +92,15 @@ describe('calculateMeiFiscal', () => {
             transaction({ amount: Number.NaN, isBusinessRevenue: true }),
         ]);
 
-        expect(result.annualRevenue).toBe(0);
-        expect(result.businessExpenses).toBe(0);
+        assert.equal(result.annualRevenue, 0);
+        assert.equal(result.businessExpenses, 0);
     });
 
     it('calcula o teto proporcional para abertura no exercício', () => {
-        expect(calculate([], '2026-01-01').effectiveAnnualLimit).toBe(81_000);
-        expect(calculate([], '2026-06-01').effectiveAnnualLimit).toBe(47_250);
-        expect(calculate([], '2026-12-01').effectiveAnnualLimit).toBe(6_750);
-        expect(calculate([], '2025-06-01').effectiveAnnualLimit).toBe(81_000);
+        assert.equal(calculate([], '2026-01-01').effectiveAnnualLimit, 81_000);
+        assert.equal(calculate([], '2026-06-01').effectiveAnnualLimit, 47_250);
+        assert.equal(calculate([], '2026-12-01').effectiveAnnualLimit, 6_750);
+        assert.equal(calculate([], '2025-06-01').effectiveAnnualLimit, 81_000);
     });
 
     it('produz doze meses e concilia a série mensal com o faturamento anual', () => {
@@ -110,10 +109,10 @@ describe('calculateMeiFiscal', () => {
             transaction({ amount: 2_500, isBusinessRevenue: true, category: 'Consultoria', date: '2026-03-20' }),
         ]);
 
-        expect(result.monthlyRevenue).toHaveLength(12);
-        expect(result.monthlyRevenue[0].total).toBe(1_000);
-        expect(result.monthlyRevenue[2].total).toBe(2_500);
-        expect(result.monthlyRevenue.reduce((sum, month) => sum + month.total, 0)).toBe(result.annualRevenue);
+        assert.equal(result.monthlyRevenue.length, 12);
+        assert.equal(result.monthlyRevenue[0].total, 1_000);
+        assert.equal(result.monthlyRevenue[2].total, 2_500);
+        assert.equal(result.monthlyRevenue.reduce((sum, month) => sum + month.total, 0), result.annualRevenue);
     });
 
     it('nunca retorna rendimento tributável negativo', () => {
@@ -122,7 +121,7 @@ describe('calculateMeiFiscal', () => {
             transaction({ amount: 2_000, transactionType: TransactionType.EXPENSE, category: 'Operação', isBusinessExpense: true }),
         ]);
 
-        expect(result.grossBusinessProfit).toBe(-1_000);
-        expect(result.estimatedTaxableAmount).toBe(0);
+        assert.equal(result.grossBusinessProfit, -1_000);
+        assert.equal(result.estimatedTaxableAmount, 0);
     });
 });

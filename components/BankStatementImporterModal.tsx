@@ -186,7 +186,11 @@ export const BankStatementImporterModal: React.FC<BankStatementImporterModalProp
             }));
 
             if (addTransactionsBatch) {
-                await addTransactionsBatch(txsToImport);
+                const confirmedCount = await addTransactionsBatch(txsToImport);
+                if (confirmedCount !== txsToImport.length) {
+                    setErrorMsg(`${confirmedCount} de ${txsToImport.length} lançamentos foram salvos. A importação não foi concluída; revise o histórico antes de tentar novamente.`);
+                    return;
+                }
             } else {
                 for (const tx of txsToImport) {
                     await addTransaction(tx);

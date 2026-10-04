@@ -159,6 +159,40 @@ export interface FixedIncomeInvestment {
 
 export type AnyInvestment = Investment | FixedIncomeInvestment;
 
+export interface InvestmentDisposalCash {
+    amount: number;
+    accountId: string;
+    category: string;
+    description: string;
+    paymentMethod: string;
+    costCenterId?: string;
+}
+
+export type InvestmentDisposalRequest = {
+    operationId: string;
+    date: string;
+    cash: InvestmentDisposalCash | null;
+} & (
+    | { kind: 'variable'; assetId?: string; assetType?: string; ticker?: string; quantity: number }
+    | { kind: 'fixed'; assetId: string; principalAmount: number }
+);
+
+export interface InvestmentDisposalResponse {
+    operationId: string;
+    replayed: boolean;
+    kind: 'variable' | 'fixed';
+    updated: Record<string, unknown>[];
+    removedIds: string[];
+    tx?: Record<string, unknown>;
+}
+
+export type InvestmentDisposalResult =
+    | { status: 'success'; committed: true; operationId: string; replayed: boolean }
+    | { status: 'error'; committed: false; message: string; rejected?: true }
+    | { status: 'reconciliation_pending'; committed: true; operationId: string; message: string }
+    | { status: 'stale'; committed: boolean; message: string };
+
+
 export interface Recurrence {
     id: string;
     label: string;

@@ -1,6 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { useFinancialData } from '../context/FinancialDataContext';
+import { useAuth } from '../context/AuthContext';
+import { calcDataParcelas } from '../utils/financial';
 import { TransactionType } from '../types';
 import type { Transaction } from '../types';
 import { Modal } from './shared/Modal';
@@ -45,6 +47,7 @@ const paymentMethodSuggestions = ['Boleto','PIX', 'Saldo Conta', 'Saldo Conta In
 
 export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen, onClose, onAddAccount, aiInfo, initial }) => {
     const { accounts, addTransaction, categories, transactions, costCenters, addCategory, addAccount, addCostCenter, isMei } = useFinancialData();
+    const { getToken } = useAuth();
     const { showToast } = useToast();
     const [transactionType, setTransactionType] = useState<TransactionType>(TransactionType.EXPENSE);
     const [accountId, setAccountId] = useState<string>('');
@@ -178,7 +181,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
 
             const res = await fetch('/api/ai/advice', {
                 method: 'POST',
-                headers: { 'content-type': 'application/json' },
+                headers: { 'content-type': 'application/json', authorization: `Bearer ${getToken()}` },
                 body: JSON.stringify(payload)
             });
 
@@ -305,7 +308,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
             for (let i = 0; i < count; i++) {
                 const currentIterationDate = new Date(baseDate);
                 if (recurrenceFrequency === 'monthly') {
-                    currentIterationDate.setMonth(baseDate.getMonth() + i);
+                    currentIterationDate.setTime(new Date(calcDataParcelas(count, baseDate)[i]).getTime());
                 } else {
                     currentIterationDate.setDate(baseDate.getDate() + (i * 7));
                 }

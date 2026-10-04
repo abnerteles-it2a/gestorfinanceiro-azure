@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useFinancialData } from '../context/FinancialDataContext';
+import { useAuth } from '../context/AuthContext';
 import { parseTransactionFromText } from '../services/marketDataService';
 import { recordCategoryPreference, recordAccountPreference, recordPaymentPreference } from '../services/marketDataService';
 import { toIsoLocalDate, dateKey } from '../utils/formatters';
@@ -15,6 +16,7 @@ import { VoiceRecordButton } from './ui/VoiceRecordButton';
 export const SmartTransactionWidget: React.FC = () => {
     const { categories, accounts, addTransaction, transactions, costCenters, addCategory, viewMode } = useFinancialData();
     const { showToast } = useToast();
+    const { getToken } = useAuth();
     const provider = String(((import.meta as any)?.env?.VITE_AI_PROVIDER) || '').trim().toLowerCase();
     const [inputText, setInputText] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -578,7 +580,7 @@ export const SmartTransactionWidget: React.FC = () => {
                     costCenters: costCenters.map(c => ({ id: c.id, name: c.name }))
                 }
             };
-            const headers: Record<string, string> = { 'content-type': 'application/json' };
+            const headers: Record<string, string> = { 'content-type': 'application/json', authorization: `Bearer ${getToken()}` };
             if (viewMode) headers['x-view-mode'] = viewMode;
             const r = await fetch('/api/ai/advice', { method: 'POST', headers, body: JSON.stringify(payload) });
             const j = await r.json();

@@ -1,145 +1,29 @@
 import React, { useState, useMemo } from 'react';
 import { useFinancialData } from '../context/FinancialDataContext';
+import { derivePortfolioAssumptions, simulatePortfolio, randomStandardNormal } from '../utils/investmentAnalytics';
 import { formatCurrency, formatPercentage } from '../utils/formatters';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, Legend } from 'recharts';
 import { SparklesIcon, TrendingUpIcon, AlertTriangleIcon } from './icons';
 
-interface MonteCarloYearData {
-  year: number;
-  label: string;
-  p10: number;
-  p50: number;
-  p90: number;
-}
-
 export const MonteCarloSimulator: React.FC = () => {
-  const { totalInvested, portfolioValue, investments, fixedIncomeInvestments } = useFinancialData();
-  
-  const initialEquity = portfolioValue > 0 ? portfolioValue : (totalInvested > 0 ? totalInvested : 50000);
+  const { investments, fixedIncomeInvestments, marketData } = useFinancialData();
   
   const [horizonYears, setHorizonYears] = useState<number>(10);
   const [monthlyContribution, setMonthlyContribution] = useState<number>(2000);
   const [targetMilestone, setTargetMilestone] = useState<number>(1000000);
   const [inflationAdjusted, setInflationAdjusted] = useState<boolean>(true);
 
-  // Derive historical expected annual return (drift) and annual volatility (sigma) from current allocation
-  const { expectedReturnAnnual, volatilityAnnual } = useMemo(() => {
-    let eqWeight = 0;
-    let fiiWeight = 0;
-    let fixedWeight = 0;
-    let cryptoWeight = 0;
+  // Allocation-based assumptions, not measured historical returns.
+  const { initialEquity, expectedReturnAnnual, volatilityAnnual } = useMemo(
+    () => derivePortfolioAssumptions(investments, fixedIncomeInvestments, marketData, inflationAdjusted),
+    [investments, fixedIncomeInvestments, marketData, inflationAdjusted],
+  );
 
-    const totalVal = Math.max(portfolioValue, 1);
-    
-    investments.forEach(inv => {
-      const val = (inv.purchasePrice || 0) * (inv.quantity || 0);
-      const type = String(inv.type || '').toUpperCase();
-      if (type.includes('CRYPTO') || type.includes('CRIPT')) cryptoWeight += val / totalVal;
-      else if (type.includes('FII') || type.includes('IMOBIL')) fiiWeight += val / totalVal;
-      else eqWeight += val / totalVal;
-    });
-
-    fixedIncomeInvestments.forEach(fi => {
-      fixedWeight += (fi.amountInvested || 0) / totalVal;
-    });
-
-    // Default institutional assumptions:
-    // Equities: return 13.5% a.a., vol 22% a.a.
-    // FIIs: return 11.0% a.a., vol 14% a.a.
-    // Fixed Income: return 10.5% a.a., vol 3% a.a.
-    // Crypto: return 25.0% a.a., vol 65% a.a.
-    const norm = (eqWeight + fiiWeight + fixedWeight + cryptoWeight) || 1;
-    const wEq = eqWeight / norm || 0.4;
-    const wFii = fiiWeight / norm || 0.3;
-    const wFix = fixedWeight / norm || 0.25;
-    const wCry = cryptoWeight / norm || 0.05;
-
-    let ret = (wEq * 0.135) + (wFii * 0.11) + (wFix * 0.105) + (wCry * 0.25);
-    // Weighted volatility with diversification discount
-    let vol = Math.sqrt(
-      Math.pow(wEq * 0.22, 2) +
-      Math.pow(wFii * 0.14, 2) +
-      Math.pow(wFix * 0.03, 2) +
-      Math.pow(wCry * 0.65, 2) +
-      (2 * wEq * wFii * 0.22 * 0.14 * 0.45)
-    );
-
-    if (inflationAdjusted) {
-      // Deduct IPCA expected benchmark of 4.5% a.a.
-      ret = (1 + ret) / (1 + 0.045) - 1;
-    }
-
-    return { expectedReturnAnnual: ret, volatilityAnnual: Math.max(vol, 0.06) };
-  }, [investments, fixedIncomeInvestments, portfolioValue, inflationAdjusted]);
-
-  // Run 1,000 Monte Carlo stochastic trajectories
-  const { trajectoryData, targetProbability, finalP10, finalP50, finalP90 } = useMemo(() => {
-    const NUM_SIMULATIONS = 1000;
-    const years = Math.max(1, Math.min(30, horizonYears));
-    const dt = 1; // 1 year step
-    const annualContrib = monthlyContribution * 12;
-
-    // Standard Normal generator (Box-Muller transform)
-    function randNormal(): number {
-      let u = 0, v = 0;
-      while (u === 0) u = Math.random();
-      while (v === 0) v = Math.random();
-      return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
-    }
-
-    // Matrix [yearIndex][simIndex]
-    const simulationMatrix: number[][] = Array.from({ length: years + 1 }, () => new Array(NUM_SIMULATIONS).fill(0));
-
-    // Initialize Year 0
-    for (let s = 0; s < NUM_SIMULATIONS; s++) {
-      simulationMatrix[0][s] = initialEquity;
-    }
-
-    const mu = expectedReturnAnnual;
-    const sigma = volatilityAnnual;
-
-    for (let y = 1; y <= years; y++) {
-      for (let s = 0; s < NUM_SIMULATIONS; s++) {
-        const prev = simulationMatrix[y - 1][s];
-        const z = randNormal();
-        // Geometric Brownian Motion step with drift correction and annual contribution
-        const growthFactor = Math.exp((mu - 0.5 * sigma * sigma) * dt + sigma * Math.sqrt(dt) * z);
-        const nextVal = (prev * growthFactor) + (annualContrib * Math.sqrt(growthFactor));
-        simulationMatrix[y][s] = Math.max(nextVal, 0);
-      }
-    }
-
-    // Calculate percentiles for each year
-    const points: MonteCarloYearData[] = [];
-    const currentYear = new Date().getFullYear();
-
-    for (let y = 0; y <= years; y++) {
-      const yearValues = [...simulationMatrix[y]].sort((a, b) => a - b);
-      const p10 = yearValues[Math.floor(NUM_SIMULATIONS * 0.10)];
-      const p50 = yearValues[Math.floor(NUM_SIMULATIONS * 0.50)];
-      const p90 = yearValues[Math.floor(NUM_SIMULATIONS * 0.90)];
-
-      points.push({
-        year: y,
-        label: y === 0 ? 'Hoje' : `+${y}a (${currentYear + y})`,
-        p10: Math.round(p10),
-        p50: Math.round(p50),
-        p90: Math.round(p90),
-      });
-    }
-
-    const finalValues = [...simulationMatrix[years]].sort((a, b) => a - b);
-    const successes = finalValues.filter(v => v >= targetMilestone).length;
-    const prob = Number(((successes / NUM_SIMULATIONS) * 100).toFixed(1));
-
-    return {
-      trajectoryData: points,
-      targetProbability: prob,
-      finalP10: points[points.length - 1]?.p10 || 0,
-      finalP50: points[points.length - 1]?.p50 || 0,
-      finalP90: points[points.length - 1]?.p90 || 0,
-    };
-  }, [initialEquity, horizonYears, monthlyContribution, targetMilestone, expectedReturnAnnual, volatilityAnnual]);
+  // Run the production simulation through deterministic draw/clock seams.
+  const { trajectoryData, targetProbability, finalP10, finalP50, finalP90 } = useMemo(
+    () => simulatePortfolio({ initialEquity, horizonYears, monthlyContribution, targetMilestone, expectedReturnAnnual, volatilityAnnual }, randomStandardNormal, new Date().getFullYear()),
+    [initialEquity, horizonYears, monthlyContribution, targetMilestone, expectedReturnAnnual, volatilityAnnual],
+  );
 
   return (
     <div className="bg-white/40 dark:bg-slate-900/40 rounded-3xl p-6 shadow-sm border border-slate-200 dark:border-slate-800 backdrop-blur-sm space-y-6">

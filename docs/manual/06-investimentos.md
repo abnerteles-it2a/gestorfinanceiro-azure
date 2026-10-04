@@ -18,7 +18,15 @@ O Gestor Financeiro conta com um motor completo de acompanhamento patrimonial pa
    - **Preço de Compra (R$)**: Preço unitário pago na data do pregão.
    - **Data da Operação**: Data da execução da ordem na corretora.
    - **Conta Bancária (Opcional)**: Ao selecionar a conta da corretora, o sistema debita automaticamente o valor total da compra do seu saldo em caixa.
-6. Clique em **Salvar**. O sistema recalcula o **Preço Médio (PM)** e a posição consolidada.
+6. Clique em **Salvar**. Compras são registradas por lote. A performance agrega os lotes do mesmo ticker para os pesos; a posição exibida por lote não constitui um livro fiscal completo de operações.
+
+**Venda e resgate:** a tela envia um único comando autenticado. A redução da posição, o movimento opcional de caixa e o registro de retry são confirmados na mesma transação de banco. Com lote explicitamente selecionado, a redução se limita àquele lote; sem seleção, usa FIFO entre lotes de ticker e tipo compatíveis. Quantidade superior à posição disponível é rejeitada.
+
+- No resgate de renda fixa, selecione a aplicação por identificador e informe o principal abatido, separado do valor recebido em caixa. Não há cálculo automático de juros ou imposto.
+- Em erro de comunicação com resultado incerto, tente novamente na mesma janela: o pedido e identificador permanecem estáveis, evitando nova baixa. Esse estado de retry é mantido em memória e não sobrevive ao recarregamento da página.
+- Se a operação confirmou, mas a atualização da tela falhou, repetir tenta somente recarregar os dados. Não envia nova venda/resgate. A janela só conclui após confirmação e reconciliação.
+- A estrutura `investment_operations` precisa estar criada pela migração antes de ativar o fluxo. Sem ela, o comando recusa a operação antes de alterar dados. Nenhuma migração remota foi executada durante a implementação.
+- A serialização cobre comandos de venda/resgate; alterações concorrentes pelos comandos CRUD legados não participam do mesmo lock. A validação com PostgreSQL real e navegador permanece necessária.
 
 ### 6.3 Como Cadastrar Ativos de Renda Fixa
 1. Em **Investimentos**, clique em **Novo Investimento** e escolha a aba **Renda Fixa**.
@@ -34,4 +42,11 @@ O Gestor Financeiro conta com um motor completo de acompanhamento patrimonial pa
 - Quando uma empresa ou FII pagar dividendos/JCP:
   - Na linha do ativo na lista de investimentos, clique no botão **"Prov." (Provento)**.
   - Informe o valor total creditado e a conta bancária onde o dinheiro foi depositado.
-  - O sistema registra o dividendo, credita a conta bancária e calcula o *Yield on Cost (YoC)* acumulado da sua carteira.
+  - O sistema registra o provento informado e seu movimento financeiro. Confirme conta, data e valor com a corretora; não use previsão de calendário como comprovante.
+
+### 6.5 Premissas e disponibilidade
+- Monte Carlo e stress utilizam exposição marcada quando há cotação, com premissas de retorno/volatilidade e cenários explicitados. Probabilidades são ilustrativas, não garantias.
+- O CDI mensal é composto, não somado. Históricos incompletos devem permanecer indisponíveis.
+- Graham, Bazin e P/VP exigem fundamentos válidos. Dado ausente não é inferido da cotação; zero observado não deve ser substituído por yield presumido.
+- Units conhecidas da B3 não são FIIs apenas por terminarem em 11. Ativos não cobertos exigem confirmação de classificação.
+- Radar de volumes não substitui apuração de lucro, custo médio fiscal, IRRF, prejuízos compensáveis ou DARF.

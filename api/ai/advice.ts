@@ -1,10 +1,10 @@
-import { parseTransactionFromText } from '../../services/marketDataService';
 import { formatCurrency } from '../../utils/formatters';
 import { askAzureOpenAI, DEFAULT_MODEL_DEPLOYMENT } from './_azure_openai';
 import { verifySession } from '../_auth_shared';
 import { getPool } from '../_db';
 
-export default async function handler(req: any, res: any) {
+export function createAdviceHandler(adapters: { db: any; verifySession: typeof verifySession; askAzureOpenAI: typeof askAzureOpenAI }) {
+ return async function handler(req: any, res: any) {
   try {
     if ((req.method || '').toUpperCase() !== 'POST') {
       res.statusCode = 405;
@@ -14,7 +14,7 @@ export default async function handler(req: any, res: any) {
     }
 
     // Require valid authenticated session to protect OpenAI token quota
-    const session = await verifySession(req, res, getPool());
+    const session = await adapters.verifySession(req, res, adapters.db);
     if (!session) return; // verifySession sets 401 response
 
     let input: any = {};
@@ -29,6 +29,16 @@ export default async function handler(req: any, res: any) {
       input = body ? JSON.parse(body) : {};
     }
 
+    const kinds = ['finance', 'transaction', 'payable', 'receivable', 'investment_transaction', 'investment_simulator', 'investment', 'accounting_audit', 'cashflow_contingency', 'subscription_optimization'];
+    const rawQuestion = input?.question ?? input?.query ?? input?.context?.text;
+    if (!input || typeof input !== 'object' || Array.isArray(input) ||
+        (input.kind != null && !kinds.includes(input.kind)) ||
+        (rawQuestion != null && (typeof rawQuestion !== 'string' || rawQuestion.length > 12000)) ||
+        (input.context != null && (typeof input.context !== 'object' || Array.isArray(input.context)))) {
+      res.statusCode = 400;
+      res.end(JSON.stringify({ error: 'invalid_input' }));
+      return;
+    }
     const ctx = input?.context || {};
     const kind = String(input?.kind || 'finance');
     const questionRaw = String(input?.question || input?.query || ctx?.text || '').trim();
@@ -100,7 +110,7 @@ Dados de Referência:
 ${JSON.stringify(txCtxObj, null, 2)}
 Texto do Usuário: "${txCtxObj.text}"`;
 
-        const rawJson = await askAzureOpenAI({
+        const rawJson = await adapters.askAzureOpenAI({
           messages: [
             { role: 'system', content: 'Você é um assistente estrito de extração JSON financeiro. Retorne apenas JSON válido.' },
             { role: 'user', content: prompt }
@@ -110,6 +120,12 @@ Texto do Usuário: "${txCtxObj.text}"`;
         });
 
         const parsed = JSON.parse(rawJson);
+        if (!parsed || !Number.isFinite(Number(parsed.amount)) || Number(parsed.amount) <= 0 ||
+            !['Entrada', 'Saída', 'Transferência'].includes(parsed.type)) {
+          res.statusCode = 502;
+          res.end(JSON.stringify({ error: 'invalid_ai_response', kind }));
+          return;
+        }
         transaction = {
           accountId: parsed.accountId || (txCtxObj.accounts[0]?.id ? String(txCtxObj.accounts[0].id) : ''),
           toAccountId: parsed.toAccountId || undefined,
@@ -145,7 +161,7 @@ Analise a mensagem ou comando falado pelo usuário e preencha os dados da opera�
 Data de Referência: ${String(ctx.today || new Date().toISOString().split('T')[0])}
 Texto Falado pelo Usuário: "${questionRaw || String(ctx.text || '')}"`;
 
-        const rawJson = await askAzureOpenAI({
+        const rawJson = await adapters.askAzureOpenAI({
           messages: [
             { role: 'system', content: 'Você é um assistente estrito de extração JSON de investimentos. Retorne apenas JSON válido.' },
             { role: 'user', content: prompt }
@@ -159,6 +175,12 @@ Texto Falado pelo Usuário: "${questionRaw || String(ctx.text || '')}"`;
         const price = Number(parsed.purchasePrice) || 0;
         const total = Number(parsed.amountInvested) || (qty > 0 && price > 0 ? qty * price : 0);
 
+        if (!Number.isFinite(total) || total <= 0 || !['buy', 'sell', 'dividend'].includes(parsed.operation) ||
+            !(parsed.ticker || parsed.name || parsed.issuer)) {
+          res.statusCode = 502;
+          res.end(JSON.stringify({ error: 'invalid_ai_response', kind }));
+          return;
+        }
         investmentTransaction = {
           assetType: parsed.assetType || 'Ações',
           operation: parsed.operation || 'buy',
@@ -275,7 +297,7 @@ Gere uma análise executiva estruturada contendo:
 5. **Plano Tático de Entrada:** Sugestão prática de execução (comprar a mercado, fracionar ordens ou aguardar correção).`;
         }
 
-        text = await askAzureOpenAI({
+        text = await adapters.askAzureOpenAI({
           messages: [
             { role: 'system', content: 'Você é o Gestor Financeiro, inteligência proprietária da plataforma. Seja técnico, objetivo e direto ao ponto com formatação elegante em markdown. Nunca mencione terceiros, OpenAI, Azure, GPT ou provedores externos.' },
             { role: 'user', content: prompt }
@@ -291,7 +313,7 @@ Gere uma análise executiva estruturada contendo:
 Contexto da Carteira:
 ${investCtx}`;
 
-        text = await askAzureOpenAI({
+        text = await adapters.askAzureOpenAI({
           messages: [
             { role: 'system', content: 'Você é o Gestor Financeiro, especialista em alocação patrimonial. Fale em português de forma clara, direta e orientada a dados. Nunca mencione provedores externos.' },
             { role: 'user', content: prompt }
@@ -332,7 +354,7 @@ Estrutura Obrigatória do Parecer Executivo:
 3. **Identificação de Vulnerabilidades e Ralos de Caixa:** Destaque as categorias que mais pesaram no resultado.
 4. **Plano de Ação Tático (3 Recomendações Imediatas):** Passos objetivos para expansão de margem de lucro líquido e conformidade tributária/contábil.`;
 
-        text = await askAzureOpenAI({
+        text = await adapters.askAzureOpenAI({
           messages: [
             { role: 'system', content: 'Você é o Gestor Financeiro, inteligência contábil e de auditoria gerencial. Seja extremamente técnico, executivo, analítico e elegante em formatação markdown.' },
             { role: 'user', content: prompt }
@@ -370,7 +392,7 @@ Estrutura Obrigatória da Resposta (Markdown elegante e direto):
 2. **Plano de Blindagem Imediata (3 Ações Táticas):** Ações práticas como antecipação seletiva de contas a receber, repactuação de prazos com fornecedores ou contingenciamento de gastos discricionários.
 3. **Recomendação Estratégica de Runway:** Como recompor a reserva operacional de liquidez para atingir pelo menos 6 meses de cobertura segura.`;
 
-        text = await askAzureOpenAI({
+        text = await adapters.askAzureOpenAI({
           messages: [
             { role: 'system', content: 'Você é o Diretor de Tesouraria do Gestor Financeiro. Seja extremamente pragmático, numérico, focado em proteção de caixa e sem enrolação.' },
             { role: 'user', content: prompt }
@@ -407,7 +429,7 @@ Estrutura Obrigatória da Resposta (Markdown):
    - Ações imediatas de cancelamento (isenção de cesta bancária conforme Resolução Bacen 3.919 - Serviços Essenciais).
    - Script direto para renegociação de planos de telecom ou SaaS com desconto de fidelidade.`;
 
-        text = await askAzureOpenAI({
+        text = await adapters.askAzureOpenAI({
           messages: [
             { role: 'system', content: 'Você é o Auditor de Custos do Gestor Financeiro. Seja analítico, estratégico e focado em corte de desperdícios.' },
             { role: 'user', content: prompt }
@@ -424,7 +446,7 @@ Analise a saúde financeira do usuário no mês atual e forneça:
 Contexto Financeiro:
 ${financeCtx}`;
 
-        text = await askAzureOpenAI({
+        text = await adapters.askAzureOpenAI({
           messages: [
             { role: 'system', content: 'Você é o Gestor Financeiro. Nunca mencione provedores externos, OpenAI ou Azure. Fale em português de forma clara e profissional.' },
             { role: 'user', content: prompt }
@@ -434,14 +456,10 @@ ${financeCtx}`;
       }
     } catch (aiErr: any) {
       console.warn('[Azure AI] Fallback triggered:', aiErr?.message);
-      if (kind === 'transaction') {
-        const categories = Array.isArray(ctx.categories) ? ctx.categories.map((c: any) => c.name || c) : [];
-        const accounts = Array.isArray(ctx.accounts) ? ctx.accounts : [];
-        transaction = await parseTransactionFromText(questionRaw, categories, accounts);
-        text = JSON.stringify(transaction || {});
-      } else {
-        text = `**Diagnóstico Financeiro**\n\n- Saldo Atual: ${formatCurrency(Number(ctx.totalBalance || 0))}\n- Receitas: ${formatCurrency(Number(ctx.monthIncome || 0))}\n- Despesas: ${formatCurrency(Number(ctx.monthExpense || 0))}\n\n*Inteligência do Gestor Financeiro temporariamente indisponível.*`;
-      }
+      res.statusCode = 503;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ error: 'ai_unavailable', kind }));
+      return;
     }
 
     res.statusCode = 200;
@@ -453,4 +471,9 @@ ${financeCtx}`;
     res.setHeader('content-type', 'application/json');
     res.end(JSON.stringify({ error: e?.message || 'error' }));
   }
+ };
+}
+
+export default async function handler(req: any, res: any) {
+  return createAdviceHandler({ db: getPool(), verifySession, askAzureOpenAI })(req, res);
 }

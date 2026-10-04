@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import { jwtVerify } from 'jose';
 import { verifySession } from './_auth_shared';
 import { getPool } from './_db';
+import { financialSnapshot, financialTransactions, listTransactions, resolveFinancialScope } from './_financial';
 
 let isSchemaEnsured = false;
 
@@ -32,6 +33,7 @@ async function ensureSchemaOnce(db: Pool) {
       } catch {}
     }
 
+    await db.query("create table if not exists public.investment_operations (scope_type text not null check (scope_type in ('personal','org')), scope_id uuid not null, operation_id uuid not null, user_id uuid not null, request_payload jsonb not null, result_payload jsonb not null, created_at timestamptz not null default now(), primary key (scope_type,scope_id,operation_id))");
     await db.query('create table if not exists public.accounts (id uuid primary key, user_id uuid not null, name text not null, bank text, initial_balance numeric(14,2) default 0, created_at timestamptz default now())');
     await db.query('create table if not exists public.categories (id uuid primary key, user_id uuid not null, name text not null, type text, icon text, created_at timestamptz default now())');
     await db.query('create table if not exists public.transactions (id uuid primary key, user_id uuid not null, date date not null, account_id uuid not null, to_account_id uuid, transaction_type text not null, category text not null, description text, amount numeric(14,2) not null, payment_method text, cost_center_id uuid, created_at timestamptz default now())');
@@ -103,6 +105,12 @@ async function ensureSchemaOnce(db: Pool) {
       try { await db.query(`alter table public.profiles add column if not exists ${colDef}`); } catch {}
     }
     
+    await db.query(`create table if not exists public.obligation_settlements (operation_id uuid primary key, obligation_id uuid not null, kind text not null check (kind in ('payable','receivable')), principal_amount numeric(14,2) not null, cash_amount numeric(14,2) not null, account_id uuid not null, transaction_id uuid not null unique, created_at timestamptz not null default now())`);
+    for (const [table,column] of [['payables','paid_amount'],['receivables','received_amount']]) {
+      await db.query(`alter table public.${table} add column if not exists ${column} numeric(14,2) default 0`);
+      await db.query(`alter table public.${table} add column if not exists transaction_id uuid`);
+      await db.query(`alter table public.${table} add column if not exists updated_at timestamptz default now()`);
+    }
     await db.query(`create table if not exists public.organizations (id uuid primary key, name text, seats int, plan_id uuid, created_at timestamptz default now())`);
     await db.query(`create table if not exists public.plans (id uuid primary key, name text, tier text, created_at timestamptz default now())`);
 
@@ -154,41 +162,15 @@ export default async function handler(req: any, res: any) {
     // 1. Fetch Profile & Org Context First
     const profileRes = await db.query('select org_id, plan_id, is_admin, preferences, business_profile from public.profiles where user_id=$1', [userId]);
     const profile = profileRes.rows[0] || null;
-    let orgId = profile?.org_id;
-    let userOrgId: string | null = profile?.org_id || null;
-    const viewMode = req.headers['x-view-mode'];
-    if (userOrgId && viewMode === 'organization') {
-        orgId = userOrgId;
-    } else {
-        orgId = null;
-    }
-
-    let role = null;
+    const financialScope = await resolveFinancialScope(db,userId,req.headers['x-view-mode']);
+    const orgId = financialScope.orgId;
+    const userOrgId: string | null = profile?.org_id || null;
+    let role = financialScope.role;
     let permissions: any[] = [];
-    let allowedCCs: string[] = [];
+    const allowedCCs: string[] = financialScope.allowedCCs || [];
 
-    if (userOrgId) {
-       role = 'owner'; // Default for org context if not found? Or should check members?
-       const memberRes = await db.query('select role from public.org_members where org_id=$1 and user_id=$2', [userOrgId, userId]);
-       if (memberRes.rows[0]) role = memberRes.rows[0].role;
-       
-       // Auto-Admin Logic: Single user orgs
-       let autoAdmin = false;
-       if (role === 'member') {
-           const countRes = await db.query('select count(*) as count from public.org_members where org_id=$1', [userOrgId]);
-           const memberCount = parseInt(countRes.rows[0]?.count || '0');
-           if (memberCount === 1) autoAdmin = true;
-       }
-
-       if (autoAdmin) {
-           role = 'admin';
-       }
-
-       if (role === 'member') {
-          const permsRes = await db.query('select cost_center_id, role from public.cost_center_permissions where user_id=$1', [userId]);
-          permissions = permsRes.rows;
-          allowedCCs = permissions.map(p => p.cost_center_id);
-       }
+    if (orgId && role === 'member') {
+      permissions = (await db.query('select cost_center_id, role from public.cost_center_permissions where org_id=$1 and user_id=$2',[orgId,userId])).rows;
     }
 
     // 2. Define Scope Filters
@@ -226,13 +208,13 @@ export default async function handler(req: any, res: any) {
         if (allowedCCs.length > 0) {
             const ccList = allowedCCs.map(id => `'${id}'`).join(',');
             // Show transactions with Allowed CC OR No CC (assuming No CC is general/visible)
-            transactionCCFilter = ` AND (cost_center_id IN (${ccList}) OR cost_center_id IS NULL)`;
+            transactionCCFilter = ` AND cost_center_id IN (${ccList})`;
             
             // Filter Cost Centers List
             costCenterFilter = ` AND id IN (${ccList})`;
         } else {
             // No allowed CCs? Only show No-CC transactions?
-            transactionCCFilter = ` AND cost_center_id IS NULL`;
+            transactionCCFilter = ` AND 1=0`;
             // No Cost Centers visible
             costCenterFilter = ` AND 1=0`; 
         }
@@ -295,14 +277,8 @@ export default async function handler(req: any, res: any) {
       `, mainParams),
       // 1: Categories
       db.query(`select id,name,type,icon,mei_category from public.categories where ${commonFilter} order by name asc`, mainParams),
-      // 2: Transactions
-      db.query(`select id,date,account_id,to_account_id,
-        CASE 
-            WHEN transaction_type IN ('income', 'Receita') THEN 'Entrada'
-            WHEN transaction_type IN ('expense', 'Despesa') THEN 'Saída'
-            ELSE transaction_type 
-        END as transaction_type,
-        category,description,amount,payment_method,cost_center_id,is_business_revenue,is_business_expense from public.transactions where ${transactionFilter} ${transactionCCFilter} order by date desc, created_at desc limit 100`, mainParams),
+      // 2: Cursor page; aggregates below are never computed from this page.
+      listTransactions(db,financialScope,{limit:100}),
       // 3: Investments
       db.query(`select id,type,ticker,quantity,purchase_price,purchase_date from public.investments where ${investmentFilter} order by created_at desc`, invParams),
       // 4: Fixed Income
@@ -322,9 +298,12 @@ export default async function handler(req: any, res: any) {
         select transaction_type, sum(CAST(amount as numeric)) as total 
         from public.transactions 
         where date >= to_date(to_char(current_date, 'YYYY-MM') || '-01', 'YYYY-MM-DD')
+        and date < (date_trunc('month', current_date) + interval '1 month')::date
         and ${transactionFilter}
         ${transactionCCFilter}
-        group by transaction_type`, mainParams)
+        group by transaction_type`, mainParams),
+      // 11: Complete authorized ledger for reports/MEI/analytics, separate from the UI page.
+      financialTransactions(db,financialScope)
     ]);
 
     // 3.5 Calculate Monthly Summary & Context
@@ -336,7 +315,8 @@ export default async function handler(req: any, res: any) {
         if (['entrada', 'income', 'receita'].includes(type)) monthIncome += val;
         if (['saída', 'saida', 'expense', 'despesa'].includes(type)) monthExpense += val;
     });
-    const monthly_summary = { income: monthIncome, expense: monthExpense };
+    const snapshot = await financialSnapshot(db,financialScope);
+    const monthly_summary = { income: snapshot.period.income, expense: snapshot.period.expense };
 
     let organization: any = null;
     let plan: any = null;
@@ -587,11 +567,14 @@ export default async function handler(req: any, res: any) {
 
     res.statusCode = 200;
     res.setHeader('content-type','application/json');
-    try { res.setHeader('cache-control','public, max-age=15, stale-while-revalidate=60'); } catch {}
+    try { res.setHeader('cache-control','private, no-store'); } catch {}
     res.end(JSON.stringify({ 
       accounts: results[0].rows, 
       categories: results[1].rows, 
-      transactions: results[2].rows, 
+      transactions: results[2].rows,
+      financial_transactions: results[11].rows,
+      transactions_meta: {hasMore:(results[2] as any).hasMore,nextCursor:(results[2] as any).nextCursor},
+      financial_snapshot: snapshot,
       investments: results[3].rows, 
       fixed_income_investments: results[4].rows, 
       goals: results[5].rows, 
@@ -613,7 +596,7 @@ export default async function handler(req: any, res: any) {
 
   } catch (e: any) {
     console.error('Bootstrap Critical Error:', e);
-    res.statusCode = 500;
+    res.statusCode = e?.message === 'organization_access_denied' ? 403 : 500;
     res.setHeader('content-type','application/json');
     res.end(JSON.stringify({ error: e?.message || 'error' }));
   }

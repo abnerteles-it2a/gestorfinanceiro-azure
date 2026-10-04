@@ -23,7 +23,12 @@ Mede a riqueza e solidez acumulada no tempo:
 ### 7.3 Regime de Caixa vs Regime de Competência
 - **Regime de Caixa**: Registra os valores no momento em que o dinheiro efetivamente entra ou sai da conta bancária (visão do extrato financeiro).
 - **Regime de Competência**: Reconhece a receita ou a despesa na data do fato gerador (quando a venda foi efetuada ou o serviço contratado, independente da data de liquidação do boleto).
-- O Gestor Financeiro permite visualizar relatórios sob ambas as óticas para compliance contábil impecável.
+- A DRE atualmente exibida usa movimentos de caixa. O núcleo de competência gerencial está em implementação; não confundir a existência de regras testadas com uma visão integrada já disponível.
+- Receita/despesa por competência deve ter data do fato econômico e vínculo com sua liquidação, para evitar dupla contagem. Registros históricos sem vínculo exigem revisão explícita; não são conciliados por coincidência de valor/data.
+- Relatórios gerenciais e pareceres de IA não garantem conformidade contábil ou fiscal. Valide classificação, completude e período com a pessoa responsável pela contabilidade.
+
+### 7.3.1 Cartão e fatura
+A compra no crédito e o pagamento da fatura são eventos distintos. O núcleo de ciclos e parcelas já dispõe de regras testadas, mas sua integração de cadastro, persistência e telas ainda está pendente. Até essa integração, não cadastre compra e pagamento como duas saídas independentes: revise os registros legados e não presuma conciliação automática.
 
 ### 7.4 Monitoramento e Obrigações Fiscais MEI
 Para microempreendedores individuais:

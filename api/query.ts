@@ -7,6 +7,8 @@ import { getApplicableCompetences } from '../utils/meiObligationRules';
 import { calculateMeiMonthlyClosing } from '../utils/meiMonthlyClosing';
 
 import { getPool } from './_db';
+import { disposeInvestment } from './_investmentOperation';
+import { listTransactions, settleObligation, patchInvestment, financialSnapshot, financialTransactions, resolveFinancialScope, type FinancialDatabase } from './_financial';
 
 const isNoDb = (): boolean => !process.env.NEON_DATABASE_URL && !process.env.DATABASE_URL;
 
@@ -57,7 +59,7 @@ export default async function handler(req: any, res: any) {
     let assertSubscriptionActive: () => Promise<void> = async () => {};
     let ensureAccountsLimit: () => Promise<void> = async () => {};
     let ensureCostCentersLimit: (targetScope: 'personal' | 'org') => Promise<void> = async () => {};
-    let enforceTxQuota: (txId: string, dateStr: string) => Promise<void> = async () => {};
+    let enforceTxQuota: (txId: string, dateStr: string, quotaDb?: FinancialDatabase) => Promise<void> = async () => {};
     let tier = 'starter';
     let orgName = '';
 
@@ -68,12 +70,12 @@ export default async function handler(req: any, res: any) {
         const preferences = (profile?.preferences || {}) as any;
         const businessProfile = String(profile?.business_profile || preferences.businessProfile || (preferences.isMei ? 'mei' : (profile?.org_id ? 'empresa' : 'pf'))).toLowerCase();
 
-        const viewMode = req.headers['x-view-mode'];
-        if (orgId && viewMode === 'organization') {
-            // Keep orgId
-        } else {
-            orgId = null;
-        }
+        const scope = await resolveFinancialScope(db,userId,req.headers['x-view-mode']);
+        orgId = scope.orgId;
+        role = scope.role || 'owner';
+        isMember = role === 'member';
+        allowedViewCCs = new Set(scope.allowedCCs || []);
+        allowedEditCCs = new Set(scope.editableCCs || []);
 
         const getTier = async (): Promise<string> => {
             try {
@@ -235,13 +237,13 @@ export default async function handler(req: any, res: any) {
             }
         };
 
-        enforceTxQuota = async (txId: string, dateStr: string) => {
+        enforceTxQuota = async (txId: string, dateStr: string, quotaDb: FinancialDatabase = db) => {
             await assertSubscriptionActive();
             const lim = Number(planLimits?.transactionsPerMonth || 0);
             if (!lim || lim >= unlimited) return;
             const yyyymm = String(dateStr || '').slice(0, 7);
             if (!/^\d{4}-\d{2}$/.test(yyyymm)) return;
-            const ex = await db.query(
+            const ex = await quotaDb.query(
               'select yyyymm from public.usage_tx_ledger where scope_type=$1 and scope_id=$2 and tx_id=$3 limit 1',
               [scopeType, scopeId, txId]
             );
@@ -249,19 +251,19 @@ export default async function handler(req: any, res: any) {
             if (existing) {
                 const prevMonth = String(existing.yyyymm || '');
                 if (prevMonth === yyyymm) return;
-                const cur = await db.query(
+                const cur = await quotaDb.query(
                   'select count(*)::int as c from public.usage_tx_ledger where scope_type=$1 and scope_id=$2 and yyyymm=$3 and tx_id <> $4',
                   [scopeType, scopeId, yyyymm, txId]
                 );
                 if (Number(cur.rows[0]?.c || 0) >= lim) throw new Error('limit_reached_transactions_month');
-                await db.query(
+                await quotaDb.query(
                   'update public.usage_tx_ledger set yyyymm=$1 where scope_type=$2 and scope_id=$3 and tx_id=$4',
                   [yyyymm, scopeType, scopeId, txId]
                 );
                 return;
             }
 
-            const q = await db.query(
+            const q = await quotaDb.query(
               `with current as (
                  select count(*)::int as c from public.usage_tx_ledger where scope_type=$1 and scope_id=$2 and yyyymm=$4
                ),
@@ -278,7 +280,7 @@ export default async function handler(req: any, res: any) {
             const inserted = Number(q.rows[0]?.inserted || 0);
             if (inserted === 1) return;
 
-            const ex2 = await db.query(
+            const ex2 = await quotaDb.query(
               'select 1 as ok from public.usage_tx_ledger where scope_type=$1 and scope_id=$2 and tx_id=$3 limit 1',
               [scopeType, scopeId, txId]
             );
@@ -287,47 +289,9 @@ export default async function handler(req: any, res: any) {
             throw new Error('limit_reached_transactions_month');
         };
 
-        if (orgId) {
-            const memberRes = await db.query('select role from public.org_members where org_id=$1 and user_id=$2', [orgId, userId]);
-            if (memberRes.rows[0]) role = memberRes.rows[0].role;
-
-            // Admin override from profile
-            if (profile?.is_admin) role = 'admin';
-            
-            // Auto-Admin Logic
-            if (role === 'member') {
-                const countRes = await db.query('select count(*) as count from public.org_members where org_id=$1', [orgId]);
-                const memberCount = parseInt(countRes.rows[0]?.count || '0');
-                if (memberCount === 1) role = 'admin';
-                else {
-                    const orgRes = await db.query('select p.tier from public.organizations o left join public.plans p on o.plan_id = p.id where o.id=$1', [orgId]);
-                    let planTier = String(orgRes.rows[0]?.tier || '').toLowerCase();
-                    
-                    // Fallback to profile plan if org plan is missing or not definitive
-                    if (!planTier && profile?.plan_id) {
-                         const planRes = await db.query('select tier from public.plans where id=$1', [profile.plan_id]);
-                         planTier = String(planRes.rows[0]?.tier || '').toLowerCase();
-                    }
-
-                    if (['starter', 'plus', 'pro', 'pró'].includes(planTier)) role = 'admin';
-                }
-            }
-
-            if (role === 'member') {
-                isMember = true;
-                const permsRes = await db.query('select cost_center_id, role from public.cost_center_permissions where org_id=$1 and user_id=$2', [orgId, userId]);
-                permsRes.rows.forEach((row: any) => {
-                    if (row.role === 'viewer' || row.role === 'editor' || row.role === 'manager') {
-                        allowedViewCCs.add(row.cost_center_id);
-                    }
-                    if (row.role === 'editor' || row.role === 'manager') {
-                        allowedEditCCs.add(row.cost_center_id);
-                    }
-                });
-            }
-        }
     } catch (e) {
         console.error('Error fetching permissions:', e);
+        throw e; // Authorization must never fall back to owner on DB failure.
     }
 
     const checkWritePermission = async (targetCCId: string | null | undefined, recordId?: string, table?: string) => {
@@ -337,17 +301,16 @@ export default async function handler(req: any, res: any) {
         if (targetCCId !== undefined) {
             if (targetCCId && !allowedEditCCs.has(targetCCId)) return false;
             // If target is null (General) but user is restricted to specific CCs, deny.
-            if (!targetCCId && allowedEditCCs.size > 0) return false;
+            if (!targetCCId || !allowedEditCCs.has(targetCCId)) return false;
         }
 
         // 2. If updating/deleting, check EXISTING record's CC
         if (recordId && table) {
-            const ALLOWED_TABLES = new Set(['transactions', 'recurrences', 'cost_centers']);
+            const ALLOWED_TABLES = new Set(['transactions', 'recurrences', 'cost_centers', 'payables', 'receivables', 'mei_tax_obligations']);
             if (!ALLOWED_TABLES.has(table)) return false;
-            const res = await db.query(`select cost_center_id from public.${table} where id=$1`, [recordId]);
+            const res = await db.query(`select ${table === 'cost_centers' ? 'id as cost_center_id' : 'cost_center_id'} from public.${table} where id=$1 and org_id=$2`, [recordId,orgId]);
             const existingCC = res.rows[0]?.cost_center_id;
-            if (existingCC && !allowedEditCCs.has(existingCC)) return false;
-            if (!existingCC && allowedEditCCs.size > 0) return false;
+            if (!existingCC || !allowedEditCCs.has(existingCC)) return false;
         }
 
         return true;
@@ -358,6 +321,7 @@ export default async function handler(req: any, res: any) {
         if (!t) return false;
         if (t.endsWith('_insert') || t.endsWith('_update') || t.endsWith('_delete') || t.endsWith('_upsert')) return true;
         if (t.includes('_mark_')) return true;
+        if (t === 'investment_dispose') return true;
         if (t === 'profile_update_preferences') return true;
         if (t === 'profile_update_business_profile') return true;
         return false;
@@ -389,7 +353,20 @@ export default async function handler(req: any, res: any) {
       }
     };
 
-    if (type === 'raw') {
+    if (type === 'investment_dispose') {
+        if (isMember) throw new Error('permission_denied_member');
+        const operation = await disposeInvestment(db, {userId,orgId}, data, enforceTxQuota);
+        res.statusCode = 200;
+        res.setHeader('content-type','application/json');
+        res.end(JSON.stringify(operation));
+        return;
+    } else if (type === 'financial_snapshot') {
+        const snapshot = await financialSnapshot(db,{userId,orgId,allowedCCs:isMember ? [...allowedViewCCs] : undefined},data.startDate && data.endDate ? {startDate:data.startDate,endDate:data.endDate} : undefined);
+        res.statusCode=200; res.setHeader('content-type','application/json');
+        res.end(JSON.stringify(snapshot)); return;
+    } else if (type === 'financial_transactions') {
+        r = await financialTransactions(db,{userId,orgId,allowedCCs:isMember ? [...allowedViewCCs] : undefined});
+    } else if (type === 'raw') {
         if (process.env.ALLOW_RAW_SQL !== 'true' || isMember) {
             res.statusCode = 403;
             res.setHeader('content-type', 'application/json');
@@ -433,46 +410,39 @@ export default async function handler(req: any, res: any) {
     }
     // --- TRANSACTIONS ---
     else if (type === 'transactions_list') {
-        const { beforeDate, limit } = data || {};
-        const lim = Math.max(1, Math.min(Number(limit || 100), 500));
-        
-        // Filter by permissions if member
-        let query = '';
-        const params: any[] = [];
-
-        if (orgId) {
-            query = 'select * from public.transactions where org_id=$1';
-            params.push(orgId);
-        } else {
-            query = 'select * from public.transactions where user_id=$1 and org_id is null';
-            params.push(userId);
-        }
-        
-        if (isMember) {
-             if (allowedViewCCs.size > 0) {
-                 const placeholders = Array.from(allowedViewCCs).map((_, i) => `$${params.length + i + 1}`).join(',');
-                 query += ` and (cost_center_id in (${placeholders}))`;
-                 allowedViewCCs.forEach(cc => params.push(cc));
-             } else {
-                 query += ' and 1=0'; 
-             }
-        }
-
-        if (beforeDate) {
-            params.push(beforeDate);
-            query += ` and date < $${params.length}`;
-        }
-        params.push(lim);
-        query += ` order by date desc, created_at desc limit $${params.length}`;
-        
-        r = await db.query(query, params);
+        const page = await listTransactions(db, {userId,orgId,allowedCCs:isMember ? [...allowedViewCCs] : undefined},data);
+        res.statusCode = 200; res.setHeader('content-type','application/json');
+        res.end(JSON.stringify(page)); return;
     } else if (type === 'transactions_insert') {
-        const { date, accountId, toAccountId, transactionType, category, description, amount, paymentMethod, costCenterId, isBusinessRevenue, isBusinessExpense } = data;
+        let { date, accountId, toAccountId, transactionType, category, description, amount, paymentMethod, costCenterId, isBusinessRevenue, isBusinessExpense } = data;
         const isIncome = transactionType === 'Entrada' || transactionType === 'income' || transactionType === 'receita';
         const isExpense = transactionType === 'Saída' || transactionType === 'expense' || transactionType === 'despesa';
         const businessRevenue = isIncome && !!isBusinessRevenue;
         const businessExpense = isExpense && !!isBusinessExpense;
         if (!(await checkWritePermission(costCenterId || null))) throw new Error('permission_denied_cc');
+
+        // Resiliência de Conta: se accountId for vazio/indefinido, busca a primeira conta ou gera uma padrão
+        if (!accountId || typeof accountId !== 'string' || accountId.trim() === '') {
+            const accRes = await db.query('select id from public.accounts where user_id=$1 order by created_at asc limit 1', [userId]);
+            if (accRes.rows[0]?.id) {
+                accountId = accRes.rows[0].id;
+            } else {
+                const newAccId = crypto.randomUUID();
+                await db.query('insert into public.accounts(id, user_id, name, bank, initial_balance) values($1, $2, $3, $4, 0)', [newAccId, userId, 'Conta Principal', 'Outros']);
+                accountId = newAccId;
+            }
+        }
+
+        if (!category || typeof category !== 'string' || category.trim() === '') {
+            category = 'Geral';
+        }
+        if (!date) {
+            date = new Date().toISOString().split('T')[0];
+        }
+        if (!transactionType) {
+            transactionType = 'Saída';
+        }
+
         const id = crypto.randomUUID();
         await enforceTxQuota(id, date);
         const targetOrgId = orgId || null;
@@ -563,12 +533,7 @@ export default async function handler(req: any, res: any) {
         r = await db.query('insert into public.investments(id,user_id,type,ticker,quantity,purchase_price,purchase_date,org_id) values($1,$2,$3,$4,$5,$6,$7,$8) returning *', [id, userId, itype, ticker, quantity, purchasePrice, purchaseDate, targetOrgId]);
     } else if (type === 'investments_update') {
         if (isMember) throw new Error('permission_denied_member');
-        const { id, type: itype, ticker, quantity, purchasePrice, purchaseDate } = data;
-        if (orgId) {
-            r = await db.query('update public.investments set type=$1, ticker=$2, quantity=$3, purchase_price=$4, purchase_date=$5 where id=$6 and org_id=$7 returning *', [itype, ticker, quantity, purchasePrice, purchaseDate, id, orgId]);
-        } else {
-            r = await db.query('update public.investments set type=$1, ticker=$2, quantity=$3, purchase_price=$4, purchase_date=$5 where id=$6 and user_id=$7 and org_id is null returning *', [itype, ticker, quantity, purchasePrice, purchaseDate, id, userId]);
-        }
+        r = await patchInvestment(db, {userId,orgId}, 'investment', data);
     } else if (type === 'investments_delete') {
         if (isMember) throw new Error('permission_denied_member');
         if (orgId) {
@@ -593,12 +558,7 @@ export default async function handler(req: any, res: any) {
         r = await db.query('insert into public.fixed_income_investments(id,user_id,name,issuer,amount_invested,yield_rate,purchase_date,maturity_date,org_id) values($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *', [id, userId, name, issuer, amountInvested, yieldRate, purchaseDate, maturityDate, targetOrgId]);
     } else if (type === 'fixed_income_update') {
         if (isMember) throw new Error('permission_denied_member');
-        const { id, name, issuer, amountInvested, yieldRate, purchaseDate, maturityDate } = data;
-        if (orgId) {
-             r = await db.query('update public.fixed_income_investments set name=$1, issuer=$2, amount_invested=$3, yield_rate=$4, purchase_date=$5, maturity_date=$6 where id=$7 and org_id=$8 returning *', [name, issuer, amountInvested, yieldRate, purchaseDate, maturityDate, id, orgId]);
-        } else {
-             r = await db.query('update public.fixed_income_investments set name=$1, issuer=$2, amount_invested=$3, yield_rate=$4, purchase_date=$5, maturity_date=$6 where id=$7 and user_id=$8 and org_id is null returning *', [name, issuer, amountInvested, yieldRate, purchaseDate, maturityDate, id, userId]);
-        }
+        r = await patchInvestment(db, {userId,orgId}, 'fixed', data);
     } else if (type === 'fixed_income_delete') {
         if (isMember) throw new Error('permission_denied_member');
         if (orgId) {
@@ -889,47 +849,10 @@ export default async function handler(req: any, res: any) {
              r = await db.query('delete from public.payables where id=$1 and user_id=$2 and org_id is null', [data.id, userId]);
         }
     } else if (type === 'payables_mark_paid') {
-        const { id, paidAmount, paidDate, accountId, paymentMethod, description, discountAmount, penaltyAmount } = data;
-        if (!(await checkWritePermission(undefined, id, 'payables'))) throw new Error('permission_denied_cc');
-        
-        let row;
-        if (orgId) {
-            row = (await db.query('select * from public.payables where id=$1 and org_id=$2', [id, orgId])).rows[0];
-        } else {
-            row = (await db.query('select * from public.payables where id=$1 and user_id=$2 and org_id is null', [id, userId])).rows[0];
-        }
-
-        if (!row) throw new Error('not_found');
-        
-        const txId = id; // Reuse ID to prevent double counting if in the same month
-        const disc = Number(discountAmount || 0);
-        const pen = Number(penaltyAmount || 0);
-        const baseAmt = (paidAmount ?? row.amount);
-        const finalAmt = Number(baseAmt) - disc + pen;
-        const descFull = [description || row.title, (paymentMethod || '').toLowerCase() === 'boleto' ? `(Boleto${disc ? `, Desconto ${formatCurrency(disc)}` : ''}${pen ? `, Multa/Juros ${formatCurrency(pen)}` : ''})` : ''].filter(Boolean).join(' ');
-        
-        await ensureCategory(userId, row.category || 'Contas a Pagar', 'Saída');
-        
-        const targetOrgId = orgId || null;
-        await enforceTxQuota(txId, paidDate || row.due_date);
-        await db.query('insert into public.transactions(id,user_id,date,account_id,to_account_id,transaction_type,category,description,amount,payment_method,cost_center_id,org_id) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)', [txId, userId, paidDate || row.due_date, accountId, null, 'Saída', row.category || 'Contas a Pagar', descFull, finalAmt, paymentMethod, row.cost_center_id, targetOrgId]);
-        
-        if (orgId) {
-             r = await db.query('update public.payables set status=$1, paid_amount=$2, transaction_id=$3, updated_at=now() where id=$4 and org_id=$5 returning *', ['paid', baseAmt, txId, id, orgId]);
-        } else {
-             r = await db.query('update public.payables set status=$1, paid_amount=$2, transaction_id=$3, updated_at=now() where id=$4 and user_id=$5 and org_id is null returning *', ['paid', baseAmt, txId, id, userId]);
-        }
-        
-        let tx;
-        if (orgId) {
-             tx = (await db.query('select * from public.transactions where id=$1 and org_id=$2', [txId, orgId])).rows[0];
-        } else {
-             tx = (await db.query('select * from public.transactions where id=$1 and user_id=$2 and org_id is null', [txId, userId])).rows[0];
-        }
-        
-        res.statusCode = 200; res.setHeader('content-type','application/json'); 
-        res.end(JSON.stringify({ rows: r.rows, tx })); 
-        return;
+        if (!(await checkWritePermission(undefined, data.id, 'payables'))) throw new Error('permission_denied_cc');
+        const settled = await settleObligation(db, {userId,orgId}, 'payable', data, enforceTxQuota);
+        res.statusCode = 200; res.setHeader('content-type','application/json');
+        res.end(JSON.stringify(settled)); return;
     }
     // --- RECEIVABLES ---
     else if (type === 'receivables_list') {
@@ -992,40 +915,10 @@ export default async function handler(req: any, res: any) {
              r = await db.query('delete from public.receivables where id=$1 and user_id=$2 and org_id is null', [data.id, userId]);
         }
     } else if (type === 'receivables_mark_received') {
-        const { id, receivedAmount, receivedDate, accountId, paymentMethod, description } = data;
-        if (!(await checkWritePermission(undefined, id, 'receivables'))) throw new Error('permission_denied_cc');
-        
-        let row;
-        if (orgId) {
-            row = (await db.query('select * from public.receivables where id=$1 and org_id=$2', [id, orgId])).rows[0];
-        } else {
-            row = (await db.query('select * from public.receivables where id=$1 and user_id=$2 and org_id is null', [id, userId])).rows[0];
-        }
-
-        if (!row) throw new Error('not_found');
-        
-        const txId = id; // Reuse ID
-        const targetOrgId = orgId || null;
-        await ensureCategory(userId, row.category || 'Contas a Receber', 'Entrada');
-        await enforceTxQuota(txId, receivedDate || row.due_date);
-        await db.query('insert into public.transactions(id,user_id,date,account_id,to_account_id,transaction_type,category,description,amount,payment_method,cost_center_id,org_id) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)', [txId, userId, receivedDate || row.due_date, accountId, null, 'Entrada', row.category || 'Contas a Receber', description || row.title, receivedAmount ?? row.amount, paymentMethod, row.cost_center_id, targetOrgId]);
-        
-        if (orgId) {
-             r = await db.query('update public.receivables set status=$1, received_amount=$2, transaction_id=$3, updated_at=now() where id=$4 and org_id=$5 returning *', ['received', receivedAmount ?? row.amount, txId, id, orgId]);
-        } else {
-             r = await db.query('update public.receivables set status=$1, received_amount=$2, transaction_id=$3, updated_at=now() where id=$4 and user_id=$5 and org_id is null returning *', ['received', receivedAmount ?? row.amount, txId, id, userId]);
-        }
-        
-        let tx;
-        if (orgId) {
-             tx = (await db.query('select * from public.transactions where id=$1 and org_id=$2', [txId, orgId])).rows[0];
-        } else {
-             tx = (await db.query('select * from public.transactions where id=$1 and user_id=$2 and org_id is null', [txId, userId])).rows[0];
-        }
-        
-        res.statusCode = 200; res.setHeader('content-type','application/json'); 
-        res.end(JSON.stringify({ rows: r.rows, tx })); 
-        return;
+        if (!(await checkWritePermission(undefined, data.id, 'receivables'))) throw new Error('permission_denied_cc');
+        const settled = await settleObligation(db, {userId,orgId}, 'receivable', data, enforceTxQuota);
+        res.statusCode = 200; res.setHeader('content-type','application/json');
+        res.end(JSON.stringify(settled)); return;
     }
     // --- PROFILES ---
     else if (type === 'profile_get') {
@@ -1114,13 +1007,31 @@ export default async function handler(req: any, res: any) {
         res.end(JSON.stringify({ error: code }));
         return;
     }
-    if (code === 'invalid_date_range' || code.startsWith('mei_obligation_') || code === 'mei_profile_required' || code === 'invalid_mei_obligation') {
+    if (code === 'investment_operation_schema_unavailable') {
+        res.statusCode = 503;
+        res.setHeader('content-type','application/json');
+        res.end(JSON.stringify({ error: code }));
+        return;
+    }
+    if (code === 'investment_operation_conflict') {
+        res.statusCode = 409;
+        res.setHeader('content-type','application/json');
+        res.end(JSON.stringify({ error: code }));
+        return;
+    }
+    if (code === 'investment_not_found') {
+        res.statusCode = 404;
+        res.setHeader('content-type','application/json');
+        res.end(JSON.stringify({ error: code }));
+        return;
+    }
+    if (code.startsWith('invalid_investment_') || code === 'investment_insufficient_quantity' || code === 'invalid_date_range' || code.startsWith('invalid_settlement_') || code === 'settlement_operation_conflict' || code === 'invalid_transaction_cursor' || code.startsWith('mei_obligation_') || code === 'mei_profile_required' || code === 'invalid_mei_obligation') {
         res.statusCode = 400;
         res.setHeader('content-type','application/json');
         res.end(JSON.stringify({ error: code }));
         return;
     }
-    if (code.startsWith('permission_denied')) {
+    if (code.startsWith('permission_denied') || code === 'organization_access_denied') {
         res.statusCode = 403;
         res.setHeader('content-type','application/json');
         res.end(JSON.stringify({ error: code }));

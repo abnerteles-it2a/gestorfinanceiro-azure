@@ -33,6 +33,7 @@ export const ReceivablesList: React.FC<{ readOnly?: boolean; hideAddForm?: boole
   const [customer, setCustomer] = useState('');
   const [notes, setNotes] = useState('');
   const [markingId, setMarkingId] = useState<string>('');
+  const settlementOperation = React.useRef<{ id: string; operationId: string } | null>(null);
   const [receivedAmount, setReceivedAmount] = useState('');
   const [receivedDate, setReceivedDate] = useState(() => new Date().toISOString().slice(0,10));
   const [accountId, setAccountId] = useState('');
@@ -197,6 +198,7 @@ export const ReceivablesList: React.FC<{ readOnly?: boolean; hideAddForm?: boole
   const onMarkReceived = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!markingId) return;
+    if (settlementOperation.current?.id !== markingId) settlementOperation.current = { id: markingId, operationId: crypto.randomUUID() };
     try {
       const it = items.find(i => i.id === markingId);
       const catName = (it?.category || 'Contas a Receber');
@@ -204,10 +206,12 @@ export const ReceivablesList: React.FC<{ readOnly?: boolean; hideAddForm?: boole
       if (!exists && addCategory) {
         try { await addCategory({ name: catName, type: 'Entrada', icon: '' }); } catch {}
       }
-      const r = await fetch('/api/query', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ type: 'receivables_mark_received', data: { id: markingId, receivedAmount: (receivedAmount ? Number(receivedAmount) : null), receivedDate, accountId, paymentMethod, description } }) });
+      const r = await fetch('/api/query', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ type: 'receivables_mark_received', data: { id: markingId, operationId: settlementOperation.current.operationId, receivedAmount: (receivedAmount ? Number(receivedAmount) : null), receivedDate, accountId, paymentMethod, description } }) });
       const j = await r.json();
       const updated = (j.rows || [])[0];
+      if (!r.ok || !updated) return;
       setItems(prev => prev.map(i => i.id === updated.id ? updated : i));
+      settlementOperation.current = null;
       if (j.tx && appendTransactionsLocal) {
         const tx = j.tx;
         appendTransactionsLocal([{ id: tx.id, date: tx.date, accountId: tx.account_id, toAccountId: tx.to_account_id || undefined, transactionType: tx.transaction_type, category: tx.category, description: tx.description || '', amount: Number(tx.amount || 0), paymentMethod: tx.payment_method || '', costCenterId: tx.cost_center_id || undefined }]);

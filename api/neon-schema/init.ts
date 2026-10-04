@@ -18,6 +18,8 @@ const getPool = () => {
 };
 
 const sqls: string[] = [
+  "create table if not exists public.investment_operations (scope_type text not null check (scope_type in ('personal','org')), scope_id uuid not null, operation_id uuid not null, user_id uuid not null, request_payload jsonb not null, result_payload jsonb not null, created_at timestamptz not null default now(), primary key (scope_type,scope_id,operation_id))",
+  'create table if not exists public.obligation_settlements (operation_id uuid primary key, obligation_id uuid not null, kind text not null check (kind in (\'payable\',\'receivable\')), principal_amount numeric(14,2) not null, cash_amount numeric(14,2) not null, account_id uuid not null, transaction_id uuid not null unique, created_at timestamptz not null default now())',
   'create table if not exists public.accounts (id uuid primary key, user_id uuid not null, name text not null, bank text, initial_balance numeric(14,2) default 0, created_at timestamptz default now())',
   'create index if not exists idx_accounts_user on public.accounts(user_id)',
   'create index if not exists idx_accounts_user_name on public.accounts(user_id, name)',
@@ -59,6 +61,12 @@ const sqls: string[] = [
   'create table if not exists public.receivables (id uuid primary key, user_id uuid not null, org_id uuid, title text not null, amount numeric(14,2) not null, due_date date not null, status text not null default \'open\', category text, account_id uuid, cost_center_id uuid, notes text, created_at timestamptz default now())',
   'create index if not exists idx_receivables_user on public.receivables(user_id)',
   'create index if not exists idx_receivables_due on public.receivables(due_date)',
+  'alter table public.payables add column if not exists paid_amount numeric(14,2) default 0',
+  'alter table public.receivables add column if not exists received_amount numeric(14,2) default 0',
+  'alter table public.payables add column if not exists transaction_id uuid',
+  'alter table public.receivables add column if not exists transaction_id uuid',
+  'alter table public.payables add column if not exists updated_at timestamptz default now()',
+  'alter table public.receivables add column if not exists updated_at timestamptz default now()',
   'create table if not exists public.fiscal_documents (id uuid primary key, user_id uuid not null, org_id uuid, pathname text not null, url text not null, content_type text, size integer, checksum text, doc_type text, issue_date date, supplier text, amount numeric(14,2), notes text, created_at timestamptz default now(), is_folder boolean default false, parent_id uuid, name text, permissions jsonb default \'{}\', cost_center_id uuid)',
   'create table if not exists public.organizations (id uuid primary key, name text not null, seats int default 5, plan_id uuid, created_at timestamptz default now())',
   'create table if not exists public.org_members (id uuid primary key default gen_random_uuid(), org_id uuid not null, user_id uuid not null, role text not null default \'member\', created_at timestamptz default now(), unique(org_id, user_id))',

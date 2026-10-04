@@ -1,5 +1,6 @@
 import https from 'https';
 import http from 'http';
+import { calculatePvp, calculateBazinPrice, calculateGrahamPrice, calculateSafetyMargin } from '../../utils/investmentValuation';
 
 export type AssetClass = 'STOCK' | 'FII' | 'CRYPTO' | 'CURRENCY' | 'OTHER';
 
@@ -93,6 +94,8 @@ export function detectAssetClass(ticker: string): AssetClass {
   if (usReits.includes(t)) {
     return 'FII';
   }
+  const equityUnits = ['TAEE11', 'SANB11', 'KLBN11', 'ALUP11', 'BPAC11', 'ENGI11', 'SAPR11', 'RNEW11', 'IGTI11', 'PINE11', 'BRBI11'];
+  if (equityUnits.includes(t)) return 'STOCK';
   const broadEtfs = ['BOVA11', 'SMAL11', 'IVVB11', 'HASH11', 'XINA11', 'GOLD11', 'DIVO11', 'BBSD11', 'SPXI11', 'BRAX11'];
   if (t.endsWith('11') && !broadEtfs.includes(t)) {
     return 'FII';
@@ -155,15 +158,38 @@ export const B3_FUNDAMENTAL_BENCHMARKS: Record<string, {
   'O': { vpa: 42.80, lpa: 1.45, dividends12m: 3.10, sector: 'REIT Imobiliário' }
 };
 
-function calculateSpecializedValuation(
+function observedNumber(...values: unknown[]): number | null {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    return null;
+  }
+  return null;
+}
+
+function observedDividends(rawData: any, asOf: Date): number | null {
+  if (Array.isArray(rawData.dividendsData?.cashDividends)) {
+    const cutoff = new Date(asOf);
+    cutoff.setUTCFullYear(cutoff.getUTCFullYear() - 1);
+    return rawData.dividendsData.cashDividends.reduce((sum: number, dividend: any) => {
+      const date = new Date(dividend.paymentDate).getTime();
+      const rate = observedNumber(dividend.rate);
+      return Number.isFinite(date) && date >= cutoff.getTime() && date <= asOf.getTime() && rate !== null && rate >= 0 ? sum + rate : sum;
+    }, 0);
+  }
+  const value = observedNumber(rawData.dividends12m);
+  return value !== null && value >= 0 ? value : null;
+}
+
+export function calculateSpecializedValuation(
   ticker: string,
   price: number,
   assetClass: AssetClass,
   rawData: any = {},
-  high52w?: number
+  high52w?: number,
+  asOf: Date = new Date()
 ): Partial<MarketItem> {
-  const normTicker = ticker.toUpperCase().trim();
-  const benchmark = B3_FUNDAMENTAL_BENCHMARKS[normTicker] || null;
+  // Untimestamped reference benchmarks are not observed fundamentals.
 
   // ─── 1. CRIPTOMOEDAS ────────────────────────────────────────────────────────
   if (assetClass === 'CRYPTO') {
@@ -207,60 +233,43 @@ function calculateSpecializedValuation(
 
   // ─── 2. FUNDOS IMOBILIÁRIOS (FIIs) ──────────────────────────────────────────
   if (assetClass === 'FII') {
-    // Proventos dos últimos 12 meses
-    let dividends12m = 0;
-    if (Array.isArray(rawData.dividendsData?.cashDividends)) {
-      const oneYearAgo = new Date();
-      oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-      dividends12m = rawData.dividendsData.cashDividends
-        .filter((d: any) => new Date(d.paymentDate || d.approvedOn || Date.now()) >= oneYearAgo)
-        .reduce((acc: number, d: any) => acc + Number(d.rate || 0), 0);
-    }
-    if (!dividends12m && typeof rawData.dividends12m === 'number' && rawData.dividends12m > 0) {
-      dividends12m = rawData.dividends12m;
-    }
-    if (!dividends12m && benchmark?.dividends12m) {
-      dividends12m = benchmark.dividends12m;
-    }
-    if (!dividends12m && price > 0) {
-      dividends12m = Math.round(price * 0.095 * 100) / 100;
-    }
+    const dividends12m = observedDividends(rawData, asOf);
 
-    const dividendYield = price > 0 && dividends12m > 0 ? (dividends12m / price) * 100 : 0;
+    const dividendYield = price > 0 && dividends12m !== null ? (dividends12m / price) * 100 : null;
 
     // Teto FII (Spread sobre NTN-B: 8.75% a.a.)
     let fiiCeilingPrice: number | null = null;
     let fiiMargin: number | null = null;
-    if (dividends12m > 0) {
-      fiiCeilingPrice = Math.round((dividends12m / 0.0875) * 100) / 100;
-      fiiMargin = price > 0 ? Math.round(((fiiCeilingPrice - price) / price) * 1000) / 10 : null;
+    if (dividends12m !== null && dividends12m > 0) {
+      fiiCeilingPrice = calculateBazinPrice(dividends12m, 8.75);
+      fiiMargin = price > 0 ? calculateSafetyMargin(fiiCeilingPrice, price) : null;
     }
 
     // Teto Bazin clássico (6% a.a.)
     let bazinPrice: number | null = null;
     let bazinMargin: number | null = null;
-    if (dividends12m > 0) {
-      bazinPrice = Math.round((dividends12m / 0.06) * 100) / 100;
-      bazinMargin = price > 0 ? Math.round(((bazinPrice - price) / price) * 1000) / 10 : null;
+    if (dividends12m !== null && dividends12m > 0) {
+      bazinPrice = calculateBazinPrice(dividends12m);
+      bazinMargin = price > 0 ? calculateSafetyMargin(bazinPrice, price) : null;
     }
 
     // VPA (Valor Patrimonial da Cota) e P/VP Dinâmico
-    const vpa = Number(rawData.bookValuePerShare || rawData.vpa || benchmark?.vpa || (price > 0 ? price : 10));
+    const vpa = observedNumber(rawData.bookValuePerShare, rawData.vpa);
     let pvp: number | null = null;
-    if (vpa > 0 && price > 0) {
-      pvp = Math.round((price / vpa) * 100) / 100;
+    if (vpa !== null && vpa > 0 && price > 0) {
+      pvp = calculatePvp(price, vpa);
     } else if (typeof rawData.priceToBook === 'number' && rawData.priceToBook > 0) {
       pvp = Math.round(rawData.priceToBook * 100) / 100;
     }
 
     // Preço Justo Patrimonial (Graham FII = 1.00x VPA)
-    const grahamPrice = vpa > 0 ? Math.round(vpa * 100) / 100 : null;
-    const grahamMargin = (grahamPrice !== null && price > 0) ? Math.round(((grahamPrice - price) / price) * 1000) / 10 : null;
+    const grahamPrice = vpa !== null && vpa > 0 ? Math.round(vpa * 100) / 100 : null;
+    const grahamMargin = (grahamPrice !== null && price > 0) ? calculateSafetyMargin(grahamPrice, price) : null;
 
     let decision: 'COMPRA_FORTE' | 'COMPRA' | 'MANTER' | 'AGUARDAR' = 'MANTER';
-    let decisionLabel = 'Preço Justo Patrimonial';
+    let decisionLabel = pvp === null ? 'Fundamentos indisponíveis' : 'Preço Justo Patrimonial';
 
-    if (pvp !== null && pvp <= 0.95 && dividendYield >= 9.0) {
+    if (pvp !== null && pvp <= 0.95 && dividendYield !== null && dividendYield >= 9.0) {
       decision = 'COMPRA_FORTE';
       decisionLabel = 'Desconto Patrimonial (P/VP < 0.95) & Alto Yield';
     } else if (pvp !== null && pvp <= 1.02 && fiiMargin !== null && fiiMargin >= 0) {
@@ -269,7 +278,7 @@ function calculateSpecializedValuation(
     } else if (pvp !== null && pvp <= 1.06) {
       decision = 'MANTER';
       decisionLabel = 'Preço Justo / Faixa de Equilíbrio';
-    } else {
+    } else if (pvp !== null) {
       decision = 'AGUARDAR';
       decisionLabel = 'Ágio Patrimonial Excessivo (P/VP > 1.06)';
     }
@@ -288,61 +297,42 @@ function calculateSpecializedValuation(
       grahamPrice,
       grahamMargin,
       pvp,
-      dividendYield: Math.round(dividendYield * 100) / 100,
-      dividends12m: Math.round(dividends12m * 100) / 100,
-      vpa: vpa || null,
+      dividendYield: dividendYield === null ? null : Math.round(dividendYield * 100) / 100,
+      dividends12m: dividends12m === null ? null : Math.round(dividends12m * 100) / 100,
+      vpa,
       drawdownFromAthPct: null,
     };
   }
 
   // ─── 3. AÇÕES (EQUITIES) ────────────────────────────────────────────────────
-  let dividends12m = 0;
-  if (Array.isArray(rawData.dividendsData?.cashDividends)) {
-    const oneYearAgo = new Date();
-    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-    dividends12m = rawData.dividendsData.cashDividends
-      .filter((d: any) => new Date(d.paymentDate || d.approvedOn || Date.now()) >= oneYearAgo)
-      .reduce((acc: number, d: any) => acc + Number(d.rate || 0), 0);
-  }
-  if (!dividends12m && typeof rawData.dividends12m === 'number' && rawData.dividends12m > 0) {
-    dividends12m = rawData.dividends12m;
-  }
-  if (!dividends12m && benchmark?.dividends12m) {
-    dividends12m = benchmark.dividends12m;
-  }
-  if (!dividends12m && price > 0) {
-    dividends12m = Math.round(price * 0.055 * 100) / 100;
-  }
+  const dividends12m = observedDividends(rawData, asOf);
 
-  const dividendYield = price > 0 && dividends12m > 0 ? (dividends12m / price) * 100 : 0;
+  const dividendYield = price > 0 && dividends12m !== null ? (dividends12m / price) * 100 : null;
 
   // Bazin clássico para ações (6% ao ano)
   let bazinPrice: number | null = null;
   let bazinMargin: number | null = null;
-  if (dividends12m > 0) {
-    bazinPrice = Math.round((dividends12m / 0.06) * 100) / 100;
-    bazinMargin = price > 0 ? Math.round(((bazinPrice - price) / price) * 1000) / 10 : null;
+  if (dividends12m !== null && dividends12m > 0) {
+    bazinPrice = calculateBazinPrice(dividends12m);
+    bazinMargin = price > 0 ? calculateSafetyMargin(bazinPrice, price) : null;
   }
 
   // Graham para ações: V = sqrt(22.5 * LPA * VPA)
-  let lpa = Number(rawData.earningsPerShare || rawData.lpa || benchmark?.lpa || 0);
-  let vpa = Number(rawData.bookValuePerShare || rawData.vpa || benchmark?.vpa || 0);
-
-  if (!lpa && price > 0) lpa = Math.round((price / 8.5) * 100) / 100;
-  if (!vpa && price > 0) vpa = Math.round((price / 1.25) * 100) / 100;
+  const lpa = observedNumber(rawData.earningsPerShare, rawData.lpa);
+  const vpa = observedNumber(rawData.bookValuePerShare, rawData.vpa);
 
   let grahamPrice: number | null = null;
   let grahamMargin: number | null = null;
 
-  if (lpa > 0 && vpa > 0) {
+  if (lpa !== null && lpa > 0 && vpa !== null && vpa > 0) {
     const rawGraham = Math.sqrt(22.5 * lpa * vpa);
     if (!isNaN(rawGraham) && isFinite(rawGraham)) {
-      grahamPrice = Math.round(rawGraham * 100) / 100;
-      grahamMargin = price > 0 ? Math.round(((grahamPrice - price) / price) * 1000) / 10 : null;
+      grahamPrice = calculateGrahamPrice(lpa, vpa);
+      grahamMargin = price > 0 ? calculateSafetyMargin(grahamPrice, price) : null;
     }
   }
 
-  const pvp = vpa > 0 && price > 0 ? Math.round((price / vpa) * 100) / 100 : (typeof rawData.priceToBook === 'number' && rawData.priceToBook > 0 ? Math.round(rawData.priceToBook * 100) / 100 : null);
+  const pvp = vpa !== null && vpa > 0 && price > 0 ? calculatePvp(price, vpa) : (typeof rawData.priceToBook === 'number' && rawData.priceToBook > 0 ? Math.round(rawData.priceToBook * 100) / 100 : null);
 
   let decision: 'COMPRA_FORTE' | 'COMPRA' | 'MANTER' | 'AGUARDAR' = 'MANTER';
   let decisionLabel = 'Preço Equilibrado';
@@ -375,11 +365,11 @@ function calculateSpecializedValuation(
     fiiCeilingPrice: null,
     fiiMargin: null,
     pvp,
-    dividendYield: Math.round(dividendYield * 100) / 100,
-    dividends12m: Math.round(dividends12m * 100) / 100,
-    lpa: lpa || null,
-    vpa: vpa || null,
-    priceEarnings: Number(rawData.priceEarnings || (lpa > 0 && price > 0 ? Math.round((price / lpa) * 10) / 10 : 0)) || null,
+    dividendYield: dividendYield === null ? null : Math.round(dividendYield * 100) / 100,
+    dividends12m: dividends12m === null ? null : Math.round(dividends12m * 100) / 100,
+    lpa,
+    vpa,
+    priceEarnings: Number(rawData.priceEarnings || (lpa !== null && lpa > 0 && price > 0 ? Math.round((price / lpa) * 10) / 10 : 0)) || null,
     drawdownFromAthPct: null,
   };
 }

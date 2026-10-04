@@ -67,7 +67,7 @@ const sumOpen = (rows: Array<{ amount: number; status: string; paid_amount?: num
 
 const Reports: React.FC = () => {
     const fd = useFinancialData() as any;
-    const { transactions, accounts, investments, fixedIncomeInvestments, marketData, isMei, viewMode, userPreferences, organizationInfo, planInfo, categories, meiOpeningDate, subscriptionInfo } = fd;
+    const { financialTransactions: transactions, accounts, investments, fixedIncomeInvestments, marketData, isMei, viewMode, userPreferences, organizationInfo, planInfo, categories, meiOpeningDate, subscriptionInfo } = fd;
     const isTrialActive = !!(subscriptionInfo?.isTrial && !subscriptionInfo?.isExpired);
     const isStarterLocked = (planInfo?.tier === 'starter') && !isTrialActive;
     const [tab, setTab] = React.useState<ReportTab>('fluxo');

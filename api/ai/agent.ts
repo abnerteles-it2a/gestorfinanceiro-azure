@@ -6,6 +6,7 @@ import { formatCurrency } from '../../utils/formatters';
 import { verifySession } from '../_auth_shared';
 import { askAzureOpenAI, DEFAULT_MODEL_DEPLOYMENT, ChatMessage } from './_azure_openai';
 import { searchManualKnowledge, formatKnowledgeForPrompt, ActionChip } from './_rag_knowledge';
+import { resolveAIReadScope, ScopeDatabase } from './_scope';
 
 // Database Pool
 let pool: Pool | null = null;
@@ -83,7 +84,8 @@ COMO LANÇAR INVESTIMENTOS:
 3. Preencha ticker/ativo, quantidade, preço e vincule à conta bancária de liquidação.
 `;
 
-export default async function handler(req: any, res: any) {
+export function createAgentHandler(adapters: { db: ScopeDatabase; verifySession: typeof verifySession; askAzureOpenAI: typeof askAzureOpenAI }) {
+ return async function handler(req: any, res: any) {
   // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -128,11 +130,20 @@ export default async function handler(req: any, res: any) {
     }
 
     // Auth & user validation
-    const result = await verifySession(req, res, getPool());
+    const result = await adapters.verifySession(req, res, adapters.db as any);
     if (!result) return;
     const { userId } = result;
 
     const viewMode = (req.headers['x-view-mode'] as string) || clientContext?.viewMode || 'personal';
+
+    let scope;
+    try {
+      scope = await resolveAIReadScope(adapters.db, userId, viewMode, clientContext?.orgId);
+    } catch (error) {
+      res.statusCode = (error as Error).message === 'organization_access_denied' ? 403 : 503;
+      res.end(JSON.stringify({ error: res.statusCode === 403 ? 'organization_access_denied' : 'financial_data_unavailable' }));
+      return;
+    }
 
     // Fetch user financial context
     let userDataContext = '';
@@ -147,28 +158,35 @@ export default async function handler(req: any, res: any) {
     let fixInvestments: any[] = [];
 
     try {
-      const db = getPool();
+      const db = adapters.db;
+      const tenantFilter = scope.orgId ? 'org_id=$1' : 'user_id=$1 AND org_id IS NULL';
+      const queryScopeId = scope.orgId || userId;
+      const queryFilter = `${tenantFilter} __CC__`;
+      const scopedQuery = (sql: string, params: any[]) => {
+        const cc = scope.role === 'member' ? `AND (cost_center_id IS NULL OR cost_center_id = ANY($${params.length + 1}::uuid[]))` : '';
+        return db.query(sql.replaceAll('__CC__', cc), scope.role === 'member' && sql.includes('__CC__') ? [...params, scope.allowedCCs] : params);
+      };
       const now = new Date();
       const startCurrent = new Date(now.getFullYear(), now.getMonth(), 1);
       const startLast = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
       // 1. User Accounts with Net Movement
-      const accountsRes = await db.query(`
+      const accountsRes = await scopedQuery(`
         SELECT 
           a.name, 
           a.initial_balance,
           (
-            COALESCE((SELECT SUM(amount) FROM public.transactions WHERE account_id = a.id AND transaction_type = 'Entrada'), 0)
+            COALESCE((SELECT SUM(amount) FROM public.transactions WHERE ${queryFilter} AND account_id = a.id AND transaction_type = 'Entrada'), 0)
             +
-            COALESCE((SELECT SUM(amount) FROM public.transactions WHERE to_account_id = a.id AND transaction_type = 'Transferência'), 0)
+            COALESCE((SELECT SUM(amount) FROM public.transactions WHERE ${queryFilter} AND to_account_id = a.id AND transaction_type = 'Transferência'), 0)
             -
-            COALESCE((SELECT SUM(amount) FROM public.transactions WHERE account_id = a.id AND transaction_type = 'Saída'), 0)
+            COALESCE((SELECT SUM(amount) FROM public.transactions WHERE ${queryFilter} AND account_id = a.id AND transaction_type = 'Saída'), 0)
             -
-            COALESCE((SELECT SUM(amount) FROM public.transactions WHERE account_id = a.id AND transaction_type = 'Transferência'), 0)
+            COALESCE((SELECT SUM(amount) FROM public.transactions WHERE ${queryFilter} AND account_id = a.id AND transaction_type = 'Transferência'), 0)
           ) as net_movement
         FROM public.accounts a 
-        WHERE a.user_id=$1
-      `, [userId]);
+        WHERE ${scope.orgId ? 'a.org_id=$1' : 'a.user_id=$1 AND a.org_id IS NULL'}
+      `, [queryScopeId]);
 
       accounts = accountsRes.rows.map(a => ({
         name: a.name,
@@ -177,16 +195,16 @@ export default async function handler(req: any, res: any) {
       }));
 
       // 2. Month Totals (Current & Last Month)
-      const totalsRes = await db.query(`
+      const totalsRes = await scopedQuery(`
         SELECT 
           DATE_TRUNC('month', date) as month_start,
           transaction_type,
           SUM(amount) as total
         FROM public.transactions 
-        WHERE user_id=$1 AND date >= $2
+        WHERE ${queryFilter} AND date >= $2
         GROUP BY 1, 2
         ORDER BY 1 DESC
-      `, [userId, startLast]);
+      `, [queryScopeId, startLast]);
 
       totalsRes.rows.forEach(row => {
         const d = new Date(new Date(row.month_start).getTime() + 43200000); 
@@ -201,41 +219,41 @@ export default async function handler(req: any, res: any) {
       });
 
       // 3. Top Expense Categories
-      const catRes = await db.query(`
+      const catRes = await scopedQuery(`
         SELECT 
           category,
           SUM(amount) as total
         FROM public.transactions 
-        WHERE user_id=$1 AND date >= $2 AND transaction_type='Saída'
+        WHERE ${queryFilter} AND date >= $2 AND transaction_type='Saída'
         GROUP BY 1
         ORDER BY 2 DESC
         LIMIT 5
-      `, [userId, startCurrent]);
+      `, [queryScopeId, startCurrent]);
       curCats = catRes.rows.map(r => `${r.category}: ${formatCurrency(Number(r.total || 0))}`);
 
       // 4. Recent Transactions
-      const txRes = await db.query(`
+      const txRes = await scopedQuery(`
         SELECT date, description, category, amount, transaction_type 
         FROM public.transactions 
-        WHERE user_id=$1 AND date >= $2 
+        WHERE ${queryFilter} AND date >= $2
         ORDER BY date DESC 
         LIMIT 10
-      `, [userId, startCurrent]);
+      `, [queryScopeId, startCurrent]);
       transactions = txRes.rows;
 
       // 5. Investments
-      const varInvRes = await db.query(`
-        SELECT type, ticker, quantity, purchase_price 
-        FROM public.investments 
-        WHERE user_id=$1
-      `, [userId]);
+      const varInvRes = scope.role === 'member' ? { rows: [] } : await scopedQuery(`
+        SELECT type, ticker, quantity, purchase_price
+        FROM public.investments
+        WHERE ${tenantFilter}
+      `, [queryScopeId]);
       varInvestments = varInvRes.rows;
 
-      const fixInvRes = await db.query(`
-        SELECT name, issuer, amount_invested, yield_rate, maturity_date 
-        FROM public.fixed_income_investments 
-        WHERE user_id=$1
-      `, [userId]);
+      const fixInvRes = scope.role === 'member' ? { rows: [] } : await scopedQuery(`
+        SELECT name, issuer, amount_invested, yield_rate, maturity_date
+        FROM public.fixed_income_investments
+        WHERE ${tenantFilter}
+      `, [queryScopeId]);
       fixInvestments = fixInvRes.rows;
 
       let totalVar = 0;
@@ -244,23 +262,23 @@ export default async function handler(req: any, res: any) {
       fixInvestments.forEach(i => totalFix += Number(i.amount_invested || 0));
 
       // 6. Payables & Receivables
-      const payablesRes = await db.query(`
+      const payablesRes = await scopedQuery(`
         SELECT title, amount, due_date, status 
         FROM public.payables 
-        WHERE user_id=$1 AND status='open'
+        WHERE ${queryFilter} AND status='open'
         ORDER BY due_date ASC
         LIMIT 5
-      `, [userId]);
+      `, [queryScopeId]);
       const payables = payablesRes.rows;
       const totalPayables = payables.reduce((acc, p) => acc + Number(p.amount || 0), 0);
 
-      const receivablesRes = await db.query(`
+      const receivablesRes = await scopedQuery(`
         SELECT title, amount, due_date, status 
         FROM public.receivables 
-        WHERE user_id=$1 AND status='open'
+        WHERE ${queryFilter} AND status='open'
         ORDER BY due_date ASC
         LIMIT 5
-      `, [userId]);
+      `, [queryScopeId]);
       const receivables = receivablesRes.rows;
       const totalReceivables = receivables.reduce((acc, r) => acc + Number(r.amount || 0), 0);
 
@@ -273,7 +291,7 @@ export default async function handler(req: any, res: any) {
       userDataContext = `
 DADOS REAIS DO USUÁRIO EM TEMPO REAL:
 - Modo Ativo: Visão ${viewMode === 'organization' ? 'Organizacional / PJ' : 'Pessoal'}
-- Patrimônio Líquido Estimado: ${formatCurrency(netWorth)} (Ativos: ${formatCurrency(totalAssets)} | Passivos a Vencer: ${formatCurrency(totalPayables)})
+- ${scope.role === 'member' ? 'Patrimônio parcial (somente dados autorizados; investimentos não disponíveis)' : 'Patrimônio Líquido Estimado'}: ${formatCurrency(netWorth)} (Ativos: ${formatCurrency(totalAssets)} | Passivos a Vencer: ${formatCurrency(totalPayables)})
 - Saldo em Caixa / Bancos (${accounts.length} contas): ${formatCurrency(totalCash)}
   ${accounts.map(a => `• ${a.name}: ${formatCurrency(a.current_balance)}`).join('\n  ') || '• Nenhuma conta bancária'}
 - Mês Atual (${now.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}):
@@ -286,14 +304,17 @@ DADOS REAIS DO USUÁRIO EM TEMPO REAL:
   ${payables.map(p => `• ${p.title}: ${formatCurrency(Number(p.amount))} (Vence em ${new Date(p.due_date).toLocaleDateString('pt-BR')})`).join('\n  ') || '• Nenhuma conta pendente'}
 - Próximas Contas a Receber:
   ${receivables.map(r => `• ${r.title}: ${formatCurrency(Number(r.amount))} (Previsto para ${new Date(r.due_date).toLocaleDateString('pt-BR')})`).join('\n  ') || '• Nenhuma receita pendente'}
-- Investimentos: Total ${formatCurrency(totalVar + totalFix)} (Renda Fixa: ${formatCurrency(totalFix)} | Renda Variável: ${formatCurrency(totalVar)})
+- Investimentos: ${scope.role === 'member' ? 'acesso restrito; dados não disponíveis nesta visão, não interpretar como saldo zero' : `Total ${formatCurrency(totalVar + totalFix)} (Renda Fixa: ${formatCurrency(totalFix)} | Renda Variável: ${formatCurrency(totalVar)})`}
   ${varInvestments.slice(0, 5).map(i => `• ${i.ticker} (${i.type}): ${i.quantity} un.`).join('\n  ')}
 - Transações Recentes:
   ${transactions.slice(0, 6).map(t => `• ${new Date(t.date).toLocaleDateString('pt-BR')} - ${t.description} (${t.category}): ${formatCurrency(Number(t.amount))} [${t.transaction_type}]`).join('\n  ')}
 `;
     } catch (dbErr: any) {
       console.warn('Could not retrieve full user context for concierge:', dbErr.message);
-      userDataContext = 'Dados do usuário indisponíveis no momento da consulta.';
+      res.statusCode = 503;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ error: 'financial_data_unavailable' }));
+      return;
     }
 
     const deployment = process.env.AZURE_OPENAI_DEPLOYMENT_NAME || 'gpt-4.1';
@@ -379,7 +400,7 @@ ${userDataContext}
 
     try {
       console.log(`[Concierge] Calling Azure AI Foundry deployment: ${deployment} for user: ${userId}`);
-      responseText = await askAzureOpenAI({
+      responseText = await adapters.askAzureOpenAI({
         messages: chatMessages,
         temperature: 0.3,
         maxTokens: 1500,
@@ -419,4 +440,9 @@ ${userDataContext}
     res.setHeader('content-type', 'application/json');
     res.end(JSON.stringify({ error: 'agent_error', message: e.message }));
   }
+ };
+}
+
+export default async function handler(req: any, res: any) {
+  return createAgentHandler({ db: getPool(), verifySession, askAzureOpenAI })(req, res);
 }

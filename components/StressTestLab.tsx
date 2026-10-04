@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useFinancialData } from '../context/FinancialDataContext';
+import { derivePortfolioAssumptions, stressPortfolio } from '../utils/investmentAnalytics';
 import { formatCurrency, formatPercentage } from '../utils/formatters';
 import { AlertTriangleIcon, TrendingUpIcon, ArrowDownIcon, SparklesIcon, WalletIcon } from './icons';
 
@@ -68,82 +69,21 @@ const HISTORICAL_CRISES: CrisisScenario[] = [
 ];
 
 export const StressTestLab: React.FC = () => {
-  const { totalInvested, portfolioValue, investments, fixedIncomeInvestments } = useFinancialData();
-  const currentEquity = portfolioValue > 0 ? portfolioValue : (totalInvested > 0 ? totalInvested : 100000);
+  const { investments, fixedIncomeInvestments, marketData } = useFinancialData();
 
   const [selectedCrisisId, setSelectedCrisisId] = useState<string>('covid19');
 
-  // Asset class breakdown
-  const allocation = useMemo(() => {
-    let equitiesVal = 0;
-    let fiisVal = 0;
-    let cryptoVal = 0;
-    let fixedVal = 0;
-
-    investments.forEach(inv => {
-      const val = (inv.purchasePrice || 0) * (inv.quantity || 0);
-      const type = String(inv.type || '').toUpperCase();
-      if (type.includes('CRYPTO') || type.includes('CRIPT')) cryptoVal += val;
-      else if (type.includes('FII') || type.includes('IMOBIL')) fiisVal += val;
-      else equitiesVal += val;
-    });
-
-    fixedIncomeInvestments.forEach(fi => {
-      fixedVal += (fi.amountInvested || 0);
-    });
-
-    const sum = equitiesVal + fiisVal + cryptoVal + fixedVal;
-    if (sum === 0) {
-      // Benchmark default 40% eq, 30% fii, 25% fix, 5% cry
-      return {
-        equities: currentEquity * 0.4,
-        fiis: currentEquity * 0.3,
-        fixed: currentEquity * 0.25,
-        crypto: currentEquity * 0.05,
-        total: currentEquity,
-      };
-    }
-
-    return {
-      equities: equitiesVal,
-      fiis: fiisVal,
-      fixed: fixedVal,
-      crypto: cryptoVal,
-      total: sum,
-    };
-  }, [investments, fixedIncomeInvestments, currentEquity]);
+  const allocation = useMemo(
+    () => derivePortfolioAssumptions(investments, fixedIncomeInvestments, marketData, false).allocation,
+    [investments, fixedIncomeInvestments, marketData],
+  );
+  const currentEquity = allocation.total;
 
   const selectedCrisis = useMemo(() => {
     return HISTORICAL_CRISES.find(c => c.id === selectedCrisisId) || HISTORICAL_CRISES[0];
   }, [selectedCrisisId]);
 
-  // Stress calculation
-  const impact = useMemo(() => {
-    const eqDelta = allocation.equities * (selectedCrisis.shockEquities / 100);
-    const fiiDelta = allocation.fiis * (selectedCrisis.shockFiis / 100);
-    const fixDelta = allocation.fixed * (selectedCrisis.shockFixedIncome / 100);
-    const cryDelta = allocation.crypto * (selectedCrisis.shockCrypto / 100);
-
-    const totalDelta = eqDelta + fiiDelta + fixDelta + cryDelta;
-    const finalEquity = Math.max(allocation.total + totalDelta, 0);
-    const totalPercentage = allocation.total > 0 ? (totalDelta / allocation.total) * 100 : 0;
-
-    // Resilience score (0 to 100): Lower drawdown vs benchmark Ibov = higher resilience
-    const ibovRef = Math.abs(selectedCrisis.benchmarkIbovShock);
-    const userDrawdown = Math.abs(totalPercentage);
-    const resilience = Math.max(10, Math.min(98, Math.round(100 - (userDrawdown / ibovRef) * 50)));
-
-    return {
-      totalDelta,
-      finalEquity,
-      totalPercentage,
-      resilience,
-      eqDelta,
-      fiiDelta,
-      fixDelta,
-      cryDelta,
-    };
-  }, [allocation, selectedCrisis]);
+  const impact = useMemo(() => stressPortfolio(allocation, selectedCrisis), [allocation, selectedCrisis]);
 
   return (
     <div className="bg-white/40 dark:bg-slate-900/40 rounded-3xl p-6 shadow-sm border border-slate-200 dark:border-slate-800 backdrop-blur-sm space-y-6">

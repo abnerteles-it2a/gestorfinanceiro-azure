@@ -1,7 +1,10 @@
 
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useFinancialData } from '../context/FinancialDataContext';
+import { useAuth } from '../context/AuthContext';
+import { buildInvestmentDisposalRequest } from '../utils/investmentOperationClient';
+import type { InvestmentDisposalRequest } from '../types';
 import { AssetType, TransactionType } from '../types';
 import type { Investment, FixedIncomeInvestment } from '../types';
 import { Modal } from './shared/Modal';
@@ -32,7 +35,18 @@ interface AddInvestmentModalProps {
 }
 
 export const AddInvestmentModal: React.FC<AddInvestmentModalProps> = ({ isOpen, onClose, initial }) => {
-    const { addInvestment, addFixedIncomeInvestment, accounts, addTransaction, categories, investments, updateInvestment, deleteInvestment, costCenters, fixedIncomeInvestments, updateFixedIncomeInvestment, deleteFixedIncomeInvestment, addCategory } = useFinancialData();
+    const { addInvestment, addFixedIncomeInvestment, accounts, addTransaction, categories, costCenters, fixedIncomeInvestments, addCategory, disposeInvestment, viewMode } = useFinancialData();
+    const { getToken, user } = useAuth();
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [saleError, setSaleError] = useState('');
+    const [salePending, setSalePending] = useState(false);
+    const [reconciliationPending, setReconciliationPending] = useState(false);
+    const [selectedFixedId, setSelectedFixedId] = useState(initial?.assetId || '');
+    const pendingSaleRef = useRef<{ request: InvestmentDisposalRequest; scope: string; epoch: number } | null>(null);
+    const submittingRef = useRef(false);
+    const modalScope = `${user?.id || ''}:${viewMode}`;
+    const modalScopeRef = useRef({ key: modalScope, epoch: 0 });
+    if (modalScopeRef.current.key !== modalScope) modalScopeRef.current = { key: modalScope, epoch: modalScopeRef.current.epoch + 1 };
     const paymentMethodSuggestions = ['PIX', 'Saldo Conta', 'Saldo Conta Investimentos', 'Saldo Corretora', 'Cartão de Débito', 'Cartão de Crédito', 'Dinheiro', 'Transferência Bancária', 'Débito Automático'];
     const [type, setType] = useState<AssetType>(AssetType.STOCK);
     const [op, setOp] = useState<'buy'|'sell'|'dividend'>('buy');
@@ -84,7 +98,7 @@ export const AddInvestmentModal: React.FC<AddInvestmentModalProps> = ({ isOpen, 
         try {
             const res = await fetch('/api/ai/advice', {
                 method: 'POST',
-                headers: { 'content-type': 'application/json' },
+                headers: { 'content-type': 'application/json', authorization: `Bearer ${getToken()}` },
                 body: JSON.stringify({
                     kind: 'investment_transaction',
                     question: speechText,
@@ -135,6 +149,54 @@ export const AddInvestmentModal: React.FC<AddInvestmentModalProps> = ({ isOpen, 
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (submittingRef.current) return;
+        if (op === 'sell') {
+            submittingRef.current = true;
+            setIsSubmitting(true);
+            setSaleError('');
+            try {
+                if (!pendingSaleRef.current) {
+                    const amount = toNumberPtBr(amountInvested);
+                    const price = toNumberPtBr(purchasePrice);
+                    const qty = Number(quantity);
+                    if (createCashTransaction && !linkAccountId) throw new Error('Selecione a conta para registrar o caixa.');
+                    const cashAmount = type === AssetType.FIXED_INCOME || type === AssetType.CRYPTO ? amount : qty * price;
+                    const request = buildInvestmentDisposalRequest({
+                        operationId: crypto.randomUUID(), date: purchaseDate, assetType: type,
+                        assetId: type === AssetType.FIXED_INCOME ? selectedFixedId : initial?.assetId,
+                        ticker: ticker.trim().toUpperCase(), quantity: qty, unitPrice: price, amount,
+                        cash: createCashTransaction ? { amount: cashAmount, accountId: linkAccountId, category: txCategory || 'Investimentos', description: type === AssetType.FIXED_INCOME ? `Resgate ${name}` : `Venda ${ticker.toUpperCase()}`, paymentMethod, ...(costCenterId ? { costCenterId } : {}) } : null,
+                    });
+                    pendingSaleRef.current = { request, scope: modalScope, epoch: modalScopeRef.current.epoch };
+                    setSalePending(true);
+                }
+                const pending = pendingSaleRef.current;
+                if (pending.scope !== modalScopeRef.current.key || pending.epoch !== modalScopeRef.current.epoch) throw new Error('Usuário ou visão alterados. Volte à visão original para reconciliar a operação.');
+                const result = await disposeInvestment(pending.request);
+                if (pending.scope !== modalScopeRef.current.key || pending.epoch !== modalScopeRef.current.epoch) return;
+                if (result.status === 'success') {
+                    pendingSaleRef.current = null;
+                    setSalePending(false);
+                    setReconciliationPending(false);
+                    onClose();
+                } else {
+                    setReconciliationPending(result.committed);
+                    if (result.status === 'error' && result.rejected) {
+                        pendingSaleRef.current = null;
+                        setSalePending(false);
+                        setSaleError(result.message);
+                    } else {
+                        setSaleError(result.committed ? `Operação confirmada; atualização pendente. ${result.message} Tente atualizar novamente; a venda não será reenviada.` : `${result.message} Tentar novamente usa a mesma operação e os mesmos valores.`);
+                    }
+                }
+            } catch (error) {
+                setSaleError(error instanceof Error ? error.message : 'Falha na venda ou resgate.');
+            } finally {
+                submittingRef.current = false;
+                setIsSubmitting(false);
+            }
+            return;
+        }
         const dateIso = new Date(purchaseDate + 'T12:00:00').toISOString();
         if (op === 'dividend') {
             if (createCashTransaction && linkAccountId) {
@@ -187,37 +249,6 @@ export const AddInvestmentModal: React.FC<AddInvestmentModalProps> = ({ isOpen, 
                         costCenterId: costCenterId || undefined
                     });
                 }
-            } else if (op === 'sell') {
-                const amt = toNumberPtBr(amountInvested) || 0;
-                if (createCashTransaction && linkAccountId && amt > 0) {
-                    {
-                        const catName = txCategory || 'Investimentos';
-                        const exists = categories.some(c => c.name.toLowerCase() === catName.toLowerCase());
-                        if (!exists) {
-                            try { await addCategory({ name: catName, type: 'Entrada', icon: '' }); } catch {}
-                        }
-                    }
-                    addTransaction({
-                        accountId: linkAccountId,
-                        transactionType: TransactionType.INCOME,
-                        amount: amt,
-                        description: `Resgate ${name}`,
-                        category: txCategory || 'Investimentos',
-                        paymentMethod,
-                        date: dateIso,
-                        costCenterId: costCenterId || undefined
-                    });
-                }
-                const targetId = initial?.assetId;
-                const targetFi = targetId ? fixedIncomeInvestments.find(fi => fi.id === targetId) : fixedIncomeInvestments.find(fi => fi.name === name);
-                if (targetFi && amt > 0) {
-                    const newAmt = Math.max(0, (targetFi.amountInvested || 0) - amt);
-                    if (newAmt > 0) {
-                        updateFixedIncomeInvestment(targetFi.id, { amountInvested: newAmt });
-                    } else {
-                        deleteFixedIncomeInvestment(targetFi.id);
-                    }
-                }
             }
         } else {
             if (op === 'buy') {
@@ -256,61 +287,28 @@ export const AddInvestmentModal: React.FC<AddInvestmentModalProps> = ({ isOpen, 
                         costCenterId: costCenterId || undefined
                     });
                 }
-            } else if (op === 'sell') {
-                let total = 0;
-                const p = toNumberPtBr(purchasePrice) || 0;
-                const soldQty = (type === AssetType.CRYPTO)
-                    ? ((toNumberPtBr(amountInvested) || 0) / (p > 0 ? p : 1))
-                    : (parseFloat(quantity) || 0);
-                total = (type === AssetType.CRYPTO)
-                    ? (toNumberPtBr(amountInvested) || 0)
-                    : (soldQty * p);
-                if (createCashTransaction && linkAccountId && total > 0) {
-                    {
-                        const catName = txCategory || 'Investimentos';
-                        const exists = categories.some(c => c.name.toLowerCase() === catName.toLowerCase());
-                        if (!exists) {
-                            try { await addCategory({ name: catName, type: 'Entrada', icon: '' }); } catch {}
-                        }
-                    }
-                    addTransaction({
-                        accountId: linkAccountId,
-                        transactionType: TransactionType.INCOME,
-                        amount: total,
-                        description: `Venda ${ticker.toUpperCase()}`,
-                        category: txCategory || 'Investimentos',
-                        paymentMethod,
-                        date: dateIso,
-                        costCenterId: costCenterId || undefined
-                    });
-                }
-                const targetId = initial?.assetId;
-                const target = targetId ? investments.find(i => i.id === targetId) : investments.find(i => i.ticker.toUpperCase() === ticker.toUpperCase());
-                if (target) {
-                    const newQty = Math.max(0, (target.quantity || 0) - soldQty);
-                    if (newQty > 0) {
-                        updateInvestment(target.id, { quantity: newQty });
-                    } else {
-                        deleteInvestment(target.id);
-                    }
-                }
             }
         }
         onClose();
     };
     
     useEffect(() => {
-        if (!isOpen) {
+        if (!isOpen && !pendingSaleRef.current && !submittingRef.current) {
            resetForm();
-        } else if (initial) {
+           setSelectedFixedId('');
+           setSaleError('');
+           setSalePending(false);
+           setReconciliationPending(false);
+        } else if (initial && !pendingSaleRef.current) {
+            setSelectedFixedId(initial.assetId || '');
             if (typeof initial.type !== 'undefined') setType(initial.type);
             if (typeof initial.ticker !== 'undefined') setTicker(initial.ticker || '');
             if (typeof initial.quantity !== 'undefined') setQuantity(String(initial.quantity));
-            if (typeof initial.purchasePrice !== 'undefined') setPurchasePrice(String(initial.purchasePrice));
+            if (typeof initial.purchasePrice !== 'undefined') setPurchasePrice(initial.op === 'sell' ? initial.purchasePrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : String(initial.purchasePrice));
             if (typeof initial.purchaseDate !== 'undefined') setPurchaseDate(initial.purchaseDate || new Date().toISOString().split('T')[0]);
             if (typeof initial.name !== 'undefined') setName(initial.name || '');
             if (typeof initial.issuer !== 'undefined') setIssuer(initial.issuer || '');
-            if (typeof initial.amountInvested !== 'undefined') setAmountInvested(String(initial.amountInvested));
+            if (typeof initial.amountInvested !== 'undefined') setAmountInvested(initial.op === 'sell' ? initial.amountInvested.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : String(initial.amountInvested));
             if (typeof initial.yieldRate !== 'undefined') setYieldRate(initial.yieldRate || '');
             if (typeof initial.maturityDate !== 'undefined') setMaturityDate(initial.maturityDate || '');
             if (typeof initial.op !== 'undefined') setOp(initial.op);
@@ -349,13 +347,13 @@ export const AddInvestmentModal: React.FC<AddInvestmentModalProps> = ({ isOpen, 
 
     const footer = (
         <div className="flex justify-end gap-3 w-full border-t border-slate-100 dark:border-slate-800 pt-4">
-            <button type="button" onClick={onClose} className="px-6 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-colors">Cancelar</button>
-            <button type="submit" form="add-investment-form" className="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold uppercase tracking-widest rounded-xl transition-all shadow-md shadow-indigo-100 dark:shadow-none">Salvar</button>
+            <button type="button" disabled={isSubmitting || salePending} onClick={onClose} className="px-6 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-colors">Cancelar</button>
+            <button type="submit" disabled={isSubmitting} form="add-investment-form" className="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold uppercase tracking-widest rounded-xl transition-all shadow-md shadow-indigo-100 dark:shadow-none">{isSubmitting ? 'Processando...' : reconciliationPending ? 'Atualizar dados' : salePending ? 'Tentar mesma operação' : 'Salvar'}</button>
         </div>
     );
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Novo Investimento" size="lg" footer={footer}>
+        <Modal isOpen={isOpen} onClose={() => { if (!submittingRef.current && !pendingSaleRef.current) onClose(); }} title="Novo Investimento" size="lg" footer={footer}>
             <div className="flex items-center justify-between mb-4">
                 {/* Lançamento por Voz com IA */}
                 <div className="flex-1 flex items-center justify-between bg-indigo-50 dark:bg-indigo-950/30 p-2.5 rounded-xl border border-indigo-200 dark:border-indigo-800/50 mr-3">
@@ -369,7 +367,7 @@ export const AddInvestmentModal: React.FC<AddInvestmentModalProps> = ({ isOpen, 
                         </span>
                     </div>
                     <VoiceRecordButton
-                        onSpeechResult={handleVoiceInvestment}
+                        onSpeechResult={text => { if (!submittingRef.current && !pendingSaleRef.current) handleVoiceInvestment(text); }}
                         isProcessing={isVoiceProcessing}
                         label="Ditar Operação"
                         size="sm"
@@ -380,8 +378,9 @@ export const AddInvestmentModal: React.FC<AddInvestmentModalProps> = ({ isOpen, 
                     <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded shrink-0 ${c.color}`}>{c.label}</span>
                 ); })()}
             </div>
+            {saleError && <p role="alert" className="text-sm mb-4">{saleError}</p>}
             <form id="add-investment-form" onSubmit={handleSubmit} className="space-y-6 p-2">
-                
+                <fieldset disabled={isSubmitting || salePending} className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <FormField label="Tipo de Ativo">
                         <Select value={type} onChange={(e) => setType(e.target.value as AssetType)}>
@@ -399,25 +398,35 @@ export const AddInvestmentModal: React.FC<AddInvestmentModalProps> = ({ isOpen, 
 
                 {type === AssetType.FIXED_INCOME ? (
                     <>
+                        {op === 'sell' && <FormField label="Investimento a resgatar">
+                            <Select required value={selectedFixedId} onChange={event => {
+                                setSelectedFixedId(event.target.value);
+                                const selected = fixedIncomeInvestments.find(asset => asset.id === event.target.value);
+                                if (selected) { setName(selected.name); setIssuer(selected.issuer); setYieldRate(selected.yieldRate); setMaturityDate(selected.maturityDate.slice(0, 10)); }
+                            }}>
+                                <option value="">Selecione a posição...</option>
+                                {fixedIncomeInvestments.map(asset => <option key={asset.id} value={asset.id}>{asset.name} — {asset.issuer} — {asset.id.slice(0, 8)}</option>)}
+                            </Select>
+                        </FormField>}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                             <FormField label="Nome do Ativo">
-                                <Input type="text" placeholder="Ex: CDB Liquidez Diária" value={name} onChange={(e) => setName(e.target.value)} required />
+                                <Input type="text" placeholder="Ex: CDB Liquidez Diária" value={name} onChange={(e) => setName(e.target.value)} required={op !== 'sell'} readOnly={op === 'sell'} />
                             </FormField>
                              <FormField label="Emissor">
-                                <Input type="text" placeholder="Ex: Banco Inter" value={issuer} onChange={(e) => setIssuer(e.target.value)} required />
+                                <Input type="text" placeholder="Ex: Banco Inter" value={issuer} onChange={(e) => setIssuer(e.target.value)} required={op !== 'sell'} readOnly={op === 'sell'} />
                             </FormField>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                             <FormField label="Valor Investido">
+                             <FormField label={op === 'sell' ? 'Principal a resgatar' : 'Valor Investido'}>
                                 <Input type="text" value={amountInvested} onChange={(e) => setAmountInvested(formatInputMoney(e.target.value))} required placeholder="0,00" />
                             </FormField>
                              <FormField label="Rentabilidade">
-                                <Input type="text" placeholder="Ex: 110% CDI" value={yieldRate} onChange={(e) => setYieldRate(e.target.value)} required />
+                                <Input type="text" placeholder="Ex: 110% CDI" value={yieldRate} onChange={(e) => setYieldRate(e.target.value)} required={op !== 'sell'} readOnly={op === 'sell'} />
                             </FormField>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                             <FormField label="Data de Vencimento">
-                                <Input type="date" value={maturityDate} onChange={(e) => setMaturityDate(e.target.value)} required />
+                                <Input type="date" value={maturityDate} onChange={(e) => setMaturityDate(e.target.value)} required={op !== 'sell'} readOnly={op === 'sell'} />
                             </FormField>
                             <FormField label="Data da Compra">
                                 <Input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} required />
@@ -490,6 +499,7 @@ export const AddInvestmentModal: React.FC<AddInvestmentModalProps> = ({ isOpen, 
                         </Select>
                     </FormField>
                 </div>
+                </fieldset>
             </form>
         </Modal>
     );

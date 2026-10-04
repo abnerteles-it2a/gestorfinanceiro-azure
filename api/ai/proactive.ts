@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import { formatCurrency } from '../../utils/formatters';
 import { verifySession } from '../_auth_shared';
 import { askAzureOpenAI } from './_azure_openai';
+import { resolveAIReadScope, ScopeDatabase } from './_scope';
 
 // DB Pool (Shared logic from agent.ts)
 let pool: Pool | null = null;
@@ -43,7 +44,8 @@ const loadEnv = async () => {
     } catch (e) {}
 };
 
-export default async function handler(req: any, res: any) {
+export function createProactiveHandler(adapters: { db: ScopeDatabase; verifySession: typeof verifySession; askAzureOpenAI: typeof askAzureOpenAI }) {
+  return async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -53,7 +55,7 @@ export default async function handler(req: any, res: any) {
   await loadEnv();
 
   // 1. Auth Check (Enforcing Single-Session Compliance)
-  const result = await verifySession(req, res, getPool());
+  const result = await adapters.verifySession(req, res, adapters.db as any);
   if (!result) return;
   const { userId } = result;
 
@@ -71,27 +73,30 @@ export default async function handler(req: any, res: any) {
       } catch (e) {}
   }
   
-  const db = getPool();
+  const db = adapters.db;
   
   // 3. Robust Context Detection
   // Check viewMode from Body OR Header
   const viewMode = body.viewMode || req.headers['x-view-mode'] || 'personal';
   const isOrgView = viewMode === 'organization' || viewMode === 'corporate';
 
-  // Fetch true Org ID from DB to avoid relying solely on Front-end state
-  const profRes = await db.query('SELECT org_id FROM public.profiles WHERE user_id=$1', [userId]);
-  const userOrgIdFromDb = profRes.rows[0]?.org_id;
-
-  // Final Context Decision
-  const effectiveOrgId = isOrgView ? (body.orgId || userOrgIdFromDb) : null;
-
-  const provider = (process.env.AI_PROVIDER || process.env.VITE_AI_PROVIDER || 'vertex').toLowerCase();
+  let scope;
+  try {
+    scope = await resolveAIReadScope(db, userId, viewMode, body.orgId);
+  } catch (error) {
+    res.statusCode = (error as Error).message === 'organization_access_denied' ? 403 : 503;
+    res.end(JSON.stringify({ error: res.statusCode === 403 ? 'organization_access_denied' : 'financial_data_unavailable' }));
+    return;
+  }
+  const provider = 'azure';
   const now = new Date();
-  
-  // Security: If in Org view but no Org ID is resolved, use a Zero GUID to ensure empty results instead of leaking Personal data.
-  const ZERO_GUID = '00000000-0000-0000-0000-000000000000';
-  const queryScopeId = isOrgView ? (effectiveOrgId || ZERO_GUID) : userId;
-  const queryFilter = isOrgView ? 'org_id=$1' : 'user_id=$1 AND org_id IS NULL';
+  const queryScopeId = scope.orgId || userId;
+  const tenantFilter = isOrgView ? 'org_id=$1' : 'user_id=$1 AND org_id IS NULL';
+  const queryFilter = `${tenantFilter} __CC__`;
+  const scopedQuery = (sql: string, params: any[]) => {
+    const ccFilter = scope.role === 'member' ? `AND (cost_center_id IS NULL OR cost_center_id = ANY($${params.length + 1}::uuid[]))` : '';
+    return db.query(sql.replaceAll('__CC__', ccFilter), scope.role === 'member' && sql.includes('__CC__') ? [...params, scope.allowedCCs] : params);
+  };
 
   console.log(`Proactive Agent: Generating insights for user ${userId} (View: ${viewMode}, ScopeId: ${queryScopeId}) using provider ${provider}`);
 
@@ -114,19 +119,19 @@ export default async function handler(req: any, res: any) {
           categoriesRes
       ] = await Promise.all([
           // Accounts & Balance
-          db.query(`
+          scopedQuery(`
               SELECT a.id, a.name, a.initial_balance,
               (
-                  COALESCE((SELECT SUM(amount) FROM public.transactions WHERE account_id = a.id AND LOWER(transaction_type) IN ('entrada', 'income', 'receita')), 0)
-                  - COALESCE((SELECT SUM(amount) FROM public.transactions WHERE account_id = a.id AND LOWER(transaction_type) IN ('saída', 'saida', 'expense', 'despesa')), 0)
-                  + COALESCE((SELECT SUM(amount) FROM public.transactions WHERE to_account_id = a.id AND LOWER(transaction_type) IN ('transferência', 'transferencia', 'transfer')), 0)
-                  - COALESCE((SELECT SUM(amount) FROM public.transactions WHERE account_id = a.id AND LOWER(transaction_type) IN ('transferência', 'transferencia', 'transfer')), 0)
+                  COALESCE((SELECT SUM(amount) FROM public.transactions WHERE ${queryFilter} AND account_id = a.id AND LOWER(transaction_type) IN ('entrada', 'income', 'receita')), 0)
+                  - COALESCE((SELECT SUM(amount) FROM public.transactions WHERE ${queryFilter} AND account_id = a.id AND LOWER(transaction_type) IN ('saída', 'saida', 'expense', 'despesa')), 0)
+                  + COALESCE((SELECT SUM(amount) FROM public.transactions WHERE ${queryFilter} AND to_account_id = a.id AND LOWER(transaction_type) IN ('transferência', 'transferencia', 'transfer')), 0)
+                  - COALESCE((SELECT SUM(amount) FROM public.transactions WHERE ${queryFilter} AND account_id = a.id AND LOWER(transaction_type) IN ('transferência', 'transferencia', 'transfer')), 0)
               ) as net
-              FROM public.accounts a WHERE ${queryFilter}
+              FROM public.accounts a WHERE ${isOrgView ? 'a.org_id=$1' : 'a.user_id=$1 AND a.org_id IS NULL'}
           `, [queryScopeId]),
 
           // Current Month Totals
-          db.query(`
+          scopedQuery(`
               SELECT transaction_type, SUM(amount) as total
               FROM public.transactions 
               WHERE ${queryFilter} AND date >= $2
@@ -134,7 +139,7 @@ export default async function handler(req: any, res: any) {
           `, [queryScopeId, new Date(now.getFullYear(), now.getMonth(), 1)]),
 
           // Recent Transactions (Last significant ones)
-          db.query(`
+          scopedQuery(`
               SELECT description, category, amount, transaction_type 
               FROM public.transactions 
               WHERE ${queryFilter}
@@ -142,8 +147,8 @@ export default async function handler(req: any, res: any) {
           `, [queryScopeId]),
 
           // Open Bills (Current Month)
-          db.query(`
-              SELECT id, title, amount, due_date, status FROM public.payables 
+          scopedQuery(`
+              SELECT id, title, amount, due_date, cost_center_id, status FROM public.payables
               WHERE ${queryFilter}
               AND status='open' 
               AND due_date <= $2
@@ -151,7 +156,7 @@ export default async function handler(req: any, res: any) {
           `, [queryScopeId, new Date(now.getFullYear(), now.getMonth() + 1, 1)]),
 
           // Top Spending Categories (Last 30 days)
-          db.query(`
+          scopedQuery(`
               SELECT category, SUM(amount) as total
               FROM public.transactions
               WHERE ${queryFilter}
@@ -161,7 +166,7 @@ export default async function handler(req: any, res: any) {
           `, [queryScopeId, new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)]),
 
           // Upcoming Obligations Summary (Next 30 days)
-          db.query(`
+          scopedQuery(`
               SELECT SUM(amount) as total, COUNT(*) as count
               FROM public.payables 
               WHERE ${queryFilter} 
@@ -170,7 +175,7 @@ export default async function handler(req: any, res: any) {
           `, [queryScopeId]),
 
           // Rhythm Analysis (History Last 30 days)
-          db.query(`
+          scopedQuery(`
               SELECT transaction_type, SUM(amount) as total, COUNT(*) as count
               FROM public.transactions
               WHERE ${queryFilter}
@@ -179,7 +184,7 @@ export default async function handler(req: any, res: any) {
           `, [queryScopeId]),
 
           // Future Projection - Payables (Next 30 to 90 days)
-          db.query(`
+          scopedQuery(`
               SELECT due_date, amount, title
               FROM public.payables
               WHERE ${queryFilter}
@@ -189,7 +194,7 @@ export default async function handler(req: any, res: any) {
           `, [queryScopeId, daysToProject]),
 
           // Future Projection - Receivables (Next 30 to 90 days)
-          db.query(`
+          scopedQuery(`
               SELECT due_date, amount, title
               FROM public.receivables
               WHERE ${queryFilter}
@@ -199,7 +204,7 @@ export default async function handler(req: any, res: any) {
           `, [queryScopeId, daysToProject]),
 
           // Future Projection - Scheduled Transactions (Next 30 to 90 days)
-          db.query(`
+          scopedQuery(`
               SELECT date, amount, transaction_type, description
               FROM public.transactions
               WHERE ${queryFilter}
@@ -208,17 +213,17 @@ export default async function handler(req: any, res: any) {
           `, [queryScopeId, daysToProject]),
 
           // Recurrences (Active)
-          db.query(`
+          scopedQuery(`
               SELECT label, amount, day_of_month, category
               FROM public.recurrences
               WHERE ${queryFilter} AND active = true
           `, [queryScopeId]),
 
           // Categories (to check recurrence type)
-          db.query(`
+          scopedQuery(`
               SELECT name, type
               FROM public.categories
-              WHERE ${queryFilter}
+              WHERE ${tenantFilter}
           `, [queryScopeId])
       ]);
       
@@ -331,11 +336,11 @@ export default async function handler(req: any, res: any) {
               type: 'negative',
               message: `Urgente: "${mainUrgent.title}" (${formatCurrency(mainUrgent.amount)}) vence ${isToday ? 'HOJE' : 'está ATRASADA'}!`,
               icon: 'alert',
-              action: {
+              ...(scope.role !== 'member' || (mainUrgent.cost_center_id && scope.writableCCs?.includes(String(mainUrgent.cost_center_id))) ? { action: {
                   label: 'Pagar Agora',
                   type: 'pay_bill',
                   params: { billId: mainUrgent.id, amount: mainUrgent.amount, title: mainUrgent.title }
-              }
+              } } : {})
           });
       }
 
@@ -445,7 +450,7 @@ export default async function handler(req: any, res: any) {
 
 Responda APENAS com o texto do conselho objetivo, sem JSON, sem formatação, sem aspas. Exemplo: "Reduza gastos variáveis para manter saldo positivo no dia 25."`;
 
-          const aiResponse = await askAzureOpenAI({
+          const aiResponse = await adapters.askAzureOpenAI({
               messages: [
                   { role: 'system', content: 'Você é o AI Advisor de finanças. Dê conselhos preditivos curtos, precisos e motivadores em português.' },
                   { role: 'user', content: aiPrompt }
@@ -480,4 +485,9 @@ Responda APENAS com o texto do conselho objetivo, sem JSON, sem formatação, se
       res.statusCode = 500;
       res.end(JSON.stringify({ error: 'internal_error' }));
   }
+  };
+}
+
+export default async function handler(req: any, res: any) {
+  return createProactiveHandler({ db: getPool(), verifySession, askAzureOpenAI })(req, res);
 }

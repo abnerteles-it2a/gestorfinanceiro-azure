@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
 import { TransactionType } from '../types';
 import { calculateMeiMonthlyClosing } from './meiMonthlyClosing';
 
@@ -21,11 +22,11 @@ describe('calculateMeiMonthlyClosing', () => {
             ],
             obligations: [{ obligation_type: 'das_mei', reference_year: 2026, reference_month: 8, status: 'pending', total_amount: 0 }],
         });
-        expect(result.revenue).toBe(1000);
-        expect(result.expenses).toBe(200);
-        expect(result.result).toBe(800);
-        expect(result.entries).toHaveLength(2);
-        expect(result.warnings).toContain('DAS da competência está pending.');
+        assert.equal(result.revenue, 1000);
+        assert.equal(result.expenses, 200);
+        assert.equal(result.result, 800);
+        assert.equal(result.entries.length, 2);
+        assert.ok(result.warnings.includes('DAS da competência está pending.'));
     });
 
     it('warns about missing activity and missing obligation', () => {
@@ -35,7 +36,7 @@ describe('calculateMeiMonthlyClosing', () => {
             categories,
             transactions: [tx({ category: 'Outra', isBusinessRevenue: true })],
         });
-        expect(result.unclassifiedRevenue).toBe(100);
-        expect(result.warnings).toHaveLength(2);
+        assert.equal(result.unclassifiedRevenue, 100);
+        assert.equal(result.warnings.length, 2);
     });
 });

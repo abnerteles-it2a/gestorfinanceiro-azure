@@ -1,67 +1,73 @@
 import React, { useState, useMemo } from 'react';
 import { useFinancialData } from '../context/FinancialDataContext';
 import { formatCurrency, formatDate } from '../utils/formatters';
-import { isIncomeTx, isExpenseTx } from '../utils/transactionHelpers';
+import { isExpenseTx } from '../utils/transactionHelpers';
+import { useAuth } from '../context/AuthContext';
+import { forecastCashFlow, CashFlowObligation } from '../utils/cashFlowForecast';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
 import { AlertTriangleIcon, SparklesIcon, TrendingUpIcon, WalletIcon } from './icons';
 
-interface CashPoint {
-  date: string;
-  label: string;
-  balance: number;
-  inflows: number;
-  outflows: number;
-}
-
 export const PredictiveCashFlow: React.FC = () => {
-  const { totalBalance, transactions } = useFinancialData();
+  const { totalBalance, transactions, viewMode, organizationInfo } = useFinancialData();
+  const { user, getToken } = useAuth();
+  const today = new Date().toLocaleDateString('sv-SE');
 
   const [daysHorizon, setDaysHorizon] = useState<30 | 60 | 90>(60);
   const [safetyReserve, setSafetyReserve] = useState<number>(5000);
 
   // Fetch open payables and receivables from local API or memory
-  const [payables, setPayables] = useState<any[]>([]);
-  const [receivables, setReceivables] = useState<any[]>([]);
+  const [payables, setPayables] = useState<CashFlowObligation[]>([]);
+  const [receivables, setReceivables] = useState<CashFlowObligation[]>([]);
+  const [loadedScope, setLoadedScope] = useState<string | null>(null);
+  const scopeKey = `${user?.id ?? ''}:${viewMode}:${organizationInfo?.id ?? ''}`;
+  const activeScope = React.useRef(scopeKey);
+  activeScope.current = scopeKey;
   const [loading, setLoading] = useState(false);
   const [aiPlan, setAiPlan] = useState<string | null>(null);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
 
   React.useEffect(() => {
+    const controller = new AbortController();
+    let disposed = false;
+    setPayables([]);
+    setReceivables([]);
+    setLoadedScope(null);
+    setAiPlan(null);
+    setIsGeneratingPlan(false);
     async function loadData() {
       setLoading(true);
       try {
-        const token = window.localStorage.getItem('gestor_financeiro_app_token');
-        const headers: Record<string, string> = { 'content-type': 'application/json' };
-        if (token) headers['authorization'] = `Bearer ${token}`;
-
+        const token = getToken();
+        if (!user?.id || !token) return;
+        const headers: Record<string, string> = { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-view-mode': viewMode };
         const [r1, r2] = await Promise.all([
-          fetch('/api/query', { method: 'POST', headers, body: JSON.stringify({ type: 'payables_list', data: { status: 'open' } }) }),
-          fetch('/api/query', { method: 'POST', headers, body: JSON.stringify({ type: 'receivables_list', data: { status: 'open' } }) })
+          fetch('/api/query', { method: 'POST', headers, signal: controller.signal, body: JSON.stringify({ type: 'payables_list', data: { status: 'open' } }) }),
+          fetch('/api/query', { method: 'POST', headers, signal: controller.signal, body: JSON.stringify({ type: 'receivables_list', data: { status: 'open' } }) })
         ]);
-
+        if (!r1.ok || !r2.ok) throw new Error('Unable to load scoped obligations');
         const [j1, j2] = await Promise.all([r1.json(), r2.json()]);
-        setPayables(j1.rows || []);
-        setReceivables(j2.rows || []);
+        if (disposed || activeScope.current !== scopeKey) return;
+        setPayables(Array.isArray(j1.rows) ? j1.rows : []);
+        setReceivables(Array.isArray(j2.rows) ? j2.rows : []);
+        setLoadedScope(scopeKey);
       } catch (e) {
-        console.warn('Failed to load payables/receivables for forecast:', e);
+        if (!disposed) console.warn('Failed to load payables/receivables for forecast:', e);
       } finally {
-        setLoading(false);
+        if (!disposed) setLoading(false);
       }
     }
-    loadData();
-  }, []);
+    void loadData();
+    return () => { disposed = true; controller.abort(); };
+  }, [user?.id, getToken, viewMode, organizationInfo?.id, scopeKey, transactions]);
 
   // Compute monthly burn rate (average monthly expense over the last 90 days)
   const burnRateMonthly = useMemo(() => {
-    const ninetyDaysAgo = new Date();
-    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-    const ninetyIso = ninetyDaysAgo.toISOString().slice(0, 10);
-
-    const recentExpenses = transactions.filter(t => isExpenseTx(t.transactionType) && (t.date || '') >= ninetyIso);
+    const ninetyIso = new Date(Date.parse(today) - 90 * 86400000).toISOString().slice(0, 10);
+    const recentExpenses = transactions.filter(t => isExpenseTx(t.transactionType) && (t.date || '').slice(0, 10) >= ninetyIso && (t.date || '').slice(0, 10) <= today);
     const totalExp = recentExpenses.reduce((s, t) => s + Number(t.amount || 0), 0);
     // Real mathematical average: if no expenses are recorded, burn rate is strictly 0 (never invent R$ 1.000)
     return totalExp > 0 ? (totalExp / 3) : 0;
-  }, [transactions]);
+  }, [transactions, today]);
 
   // Runway in months
   const runwayMonths = useMemo(() => {
@@ -69,71 +75,27 @@ export const PredictiveCashFlow: React.FC = () => {
     return Number((Math.max(totalBalance, 0) / burnRateMonthly).toFixed(1));
   }, [totalBalance, burnRateMonthly]);
 
-  // Forecast daily balances
-  const { forecastPoints, minBalance, minBalanceDate, totalProjectedInflow, totalProjectedOutflow } = useMemo(() => {
-    const points: CashPoint[] = [];
-    const today = new Date();
-    let runningBalance = totalBalance;
-    let minBal = totalBalance;
-    let minDate = today.toISOString().slice(0, 10);
-    let sumIn = 0;
-    let sumOut = 0;
-
-    // Daily recurring baseline expense from real historical burn rate
-    const dailyBaseline = burnRateMonthly > 0 ? (burnRateMonthly / 30) : 0;
-
-    for (let d = 0; d <= daysHorizon; d++) {
-      const curDate = new Date(today);
-      curDate.setDate(today.getDate() + d);
-      const dateStr = curDate.toISOString().slice(0, 10);
-
-      // Inflows scheduled for this day
-      const dayRec = receivables.filter(r => String(r.due_date || '').slice(0, 10) === dateStr);
-      const dayInflows = dayRec.reduce((s, r) => s + Number((r.amount || 0) - (r.received_amount || 0)), 0);
-
-      // Outflows scheduled for this day
-      const dayPay = payables.filter(p => String(p.due_date || '').slice(0, 10) === dateStr);
-      const dayScheduledOut = dayPay.reduce((s, p) => s + Number((p.amount || 0) - (p.paid_amount || 0)), 0);
-
-      const dayOutflows = dayScheduledOut + (d > 0 ? dailyBaseline : 0);
-
-      runningBalance = runningBalance + dayInflows - (d > 0 ? dayOutflows : 0);
-      sumIn += dayInflows;
-      if (d > 0) sumOut += dayOutflows;
-
-      if (runningBalance < minBal) {
-        minBal = runningBalance;
-        minDate = dateStr;
-      }
-
-      points.push({
-        date: dateStr,
-        label: `${String(curDate.getDate()).padStart(2, '0')}/${String(curDate.getMonth() + 1).padStart(2, '0')}`,
-        balance: Math.round(runningBalance),
-        inflows: Math.round(dayInflows),
-        outflows: Math.round(dayOutflows),
-      });
-    }
-
-    return {
-      forecastPoints: points,
-      minBalance: Math.round(minBal),
-      minBalanceDate: minDate,
-      totalProjectedInflow: Math.round(sumIn),
-      totalProjectedOutflow: Math.round(sumOut),
-    };
-  }, [totalBalance, daysHorizon, receivables, payables, burnRateMonthly]);
+  // Scheduled obligations already represent future spending; adding historical burn
+  // again would double count it. Historical burn remains a separate runway metric.
+  const { forecastPoints, minBalance, minBalanceDate, totalProjectedInflow, totalProjectedOutflow } = useMemo(() => forecastCashFlow({
+    today,
+    daysHorizon,
+    openingBalance: totalBalance,
+    receivables: loadedScope === scopeKey ? receivables : [],
+    payables: loadedScope === scopeKey ? payables : [],
+  }), [today, totalBalance, daysHorizon, receivables, payables, loadedScope, scopeKey]);
 
   // Only trigger deficit alert if there are actual outflows that cause balance to drop below reserve
   const hasLiquidityDeficit = totalProjectedOutflow > 0 && (minBalance < 0 || minBalance < safetyReserve);
 
   const handleGenerateAiPlan = async () => {
+    const requestScope = scopeKey;
     setIsGeneratingPlan(true);
     setAiPlan(null);
     try {
-      const token = window.localStorage.getItem('gestor_financeiro_app_token');
-      const headers: Record<string, string> = { 'content-type': 'application/json' };
-      if (token) headers['authorization'] = `Bearer ${token}`;
+      const token = getToken();
+      if (!user?.id || !token || loadedScope !== scopeKey) throw new Error('Scoped forecast is unavailable');
+      const headers: Record<string, string> = { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-view-mode': viewMode };
 
       const res = await fetch('/api/ai/advice', {
         method: 'POST',
@@ -152,16 +114,18 @@ export const PredictiveCashFlow: React.FC = () => {
           }
         })
       });
+      if (!res.ok) throw new Error('Unable to generate scoped plan');
       const data = await res.json();
+      if (activeScope.current !== requestScope) return;
       if (data.text) {
         setAiPlan(data.text);
       } else {
         setAiPlan('Não foi possível formular o plano de contingência no momento.');
       }
     } catch (e: any) {
-      setAiPlan('Erro ao contatar o assistente de tesouraria.');
+      if (activeScope.current === requestScope) setAiPlan('Erro ao contatar o assistente de tesouraria.');
     } finally {
-      setIsGeneratingPlan(false);
+      if (activeScope.current === requestScope) setIsGeneratingPlan(false);
     }
   };
 
@@ -178,7 +142,7 @@ export const PredictiveCashFlow: React.FC = () => {
               Radar Preditivo de Fluxo de Caixa (30 / 60 / 90 Dias)
             </h2>
             <p className="text-[11px] text-slate-500 font-medium">
-              Projeção diária consolidada de Contas a Pagar, Receber, Cartão e Burn Rate operacional
+              Projeção de contas abertas; vencidos previstos para hoje. Burn rate separado, sem somar histórico novamente.
             </p>
           </div>
         </div>
@@ -187,7 +151,7 @@ export const PredictiveCashFlow: React.FC = () => {
           {/* Action Button: AI Contingency Plan */}
           <button
             onClick={handleGenerateAiPlan}
-            disabled={isGeneratingPlan}
+            disabled={isGeneratingPlan || loading || loadedScope !== scopeKey}
             className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-600 hover:to-cyan-600 text-white shadow-md shadow-teal-500/20 transition-all active:scale-95 disabled:opacity-50"
           >
             <SparklesIcon className="w-3.5 h-3.5" />

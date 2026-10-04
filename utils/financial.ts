@@ -91,7 +91,11 @@ export function calcDataParcelas(
   while (novasParcelas.length < numeroParcelas) {
     const prevDate = new Date(novasParcelas[novasParcelas.length - 1]);
     const nextDate = new Date(prevDate);
-    nextDate.setMonth(nextDate.getMonth() + 1);
+    const anchorDay = dateIni.getUTCDate();
+    nextDate.setUTCDate(1);
+    nextDate.setUTCMonth(nextDate.getUTCMonth() + 1);
+    const lastDay = new Date(Date.UTC(nextDate.getUTCFullYear(), nextDate.getUTCMonth() + 1, 0)).getUTCDate();
+    nextDate.setUTCDate(Math.min(anchorDay, lastDay));
     novasParcelas.push(nextDate);
   }
 

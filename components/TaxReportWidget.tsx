@@ -1,69 +1,12 @@
 import React, { useMemo } from 'react';
 import { useFinancialData } from '../context/FinancialDataContext';
 import { formatCurrency } from '../utils/formatters';
-import { AssetType } from '../types';
+import { summarizeInvestmentSales } from '../utils/investmentReporting';
 
 export const TaxReportWidget: React.FC = () => {
   const { transactions, isPrivacyMode } = useFinancialData();
 
-  // Compute stock and FII sales in the current month
-  const taxSummary = useMemo(() => {
-    const now = new Date();
-    const curYear = now.getFullYear();
-    const curMonth = now.getMonth();
-
-    let stockSalesVolume = 0;
-    let fiiSalesVolume = 0;
-    let cryptoSalesVolume = 0;
-
-    // We identify sales by transactions categorized or described as Venda de Ativos / Investimentos
-    transactions.forEach(t => {
-      const d = new Date(t.date);
-      if (d.getFullYear() === curYear && d.getMonth() === curMonth) {
-        const desc = (t.description || '').toLowerCase();
-        const cat = (t.category || '').toLowerCase();
-
-        const isSale = desc.includes('venda') || cat.includes('venda') || desc.includes('resgate');
-        if (isSale) {
-          if (desc.includes('fii') || desc.includes('11')) {
-            fiiSalesVolume += t.amount;
-          } else if (desc.includes('btc') || desc.includes('eth') || desc.includes('cripto')) {
-            cryptoSalesVolume += t.amount;
-          } else {
-            stockSalesVolume += t.amount;
-          }
-        }
-      }
-    });
-
-    const STOCK_EXEMPTION_LIMIT = 20000;
-    const CRYPTO_EXEMPTION_LIMIT = 35000;
-
-    const stockExemptionUsedPct = Math.min(100, (stockSalesVolume / STOCK_EXEMPTION_LIMIT) * 100);
-    const stockRemainingExemption = Math.max(0, STOCK_EXEMPTION_LIMIT - stockSalesVolume);
-    const isStockExempt = stockSalesVolume <= STOCK_EXEMPTION_LIMIT;
-
-    const cryptoExemptionUsedPct = Math.min(100, (cryptoSalesVolume / CRYPTO_EXEMPTION_LIMIT) * 100);
-    const cryptoRemainingExemption = Math.max(0, CRYPTO_EXEMPTION_LIMIT - cryptoSalesVolume);
-    const isCryptoExempt = cryptoSalesVolume <= CRYPTO_EXEMPTION_LIMIT;
-
-    // Due date of DARF is the last business day of the next month
-    const nextMonth = new Date(curYear, curMonth + 2, 0);
-    const darfDueDate = nextMonth.toLocaleDateString('pt-BR');
-
-    return {
-      stockSalesVolume,
-      stockRemainingExemption,
-      stockExemptionUsedPct,
-      isStockExempt,
-      fiiSalesVolume,
-      cryptoSalesVolume,
-      cryptoRemainingExemption,
-      cryptoExemptionUsedPct,
-      isCryptoExempt,
-      darfDueDate
-    };
-  }, [transactions]);
+  const taxSummary = useMemo(() => summarizeInvestmentSales(transactions, new Date()), [transactions]);
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -82,14 +25,14 @@ export const TaxReportWidget: React.FC = () => {
             Apuração de Isenções & Tributação de Renda Variável
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-2xl leading-relaxed">
-            Acompanhe o teto de isenção de R$ 20.000/mês para Ações, controle vendas de Fundos Imobiliários (tributadas em 20%) e evite surpresas com a Receita Federal.
+            Monitor indicativo de vendas identificadas na descrição. Não apura lucro, day trade, custos ou imposto devido; confirme a classificação e o enquadramento fiscal antes de emitir DARF.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           <div className="text-right">
             <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
-              Vencimento DARF Mês
+              Referência DARF (sem feriados)
             </span>
             <span className="text-sm font-bold text-slate-800 dark:text-slate-200">
               {taxSummary.darfDueDate}
@@ -106,7 +49,7 @@ export const TaxReportWidget: React.FC = () => {
             <div className="flex items-center justify-between">
               <span className="text-xs font-black uppercase tracking-widest text-slate-400">Ações (Mercado à Vista)</span>
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${taxSummary.isStockExempt ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'}`}>
-                {taxSummary.isStockExempt ? 'Isento no Mês' : 'Tributável (15%)'}
+                {taxSummary.isStockExempt ? 'Dentro do Limite' : 'Acima do Limite'}
               </span>
             </div>
             <div className="mt-3">
@@ -163,7 +106,7 @@ export const TaxReportWidget: React.FC = () => {
             <div className="flex items-center justify-between">
               <span className="text-xs font-black uppercase tracking-widest text-slate-400">Criptomoedas</span>
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${taxSummary.isCryptoExempt ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'}`}>
-                {taxSummary.isCryptoExempt ? 'Isento no Mês' : 'Tributável (15%)'}
+                {taxSummary.isCryptoExempt ? 'Dentro do Limite' : 'Acima do Limite'}
               </span>
             </div>
             <div className="mt-3">

@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import { financialTransactions } from './_financial';
+const ledger=Array.from({length:201},(_,i)=>({id:String(i),user_id:'user',org_id:null,cost_center_id:null,amount:1}));
+ledger.push({id:'other',user_id:'other',org_id:null,cost_center_id:null,amount:99});
+ledger.push({id:'org-visible',user_id:'other',org_id:'org',cost_center_id:'cc',amount:10});
+ledger.push({id:'org-hidden',user_id:'user',org_id:'org',cost_center_id:null,amount:20});
+const calls: {sql:string;params:any[]}[]=[];
+const db={async query(sql:string,params:any[]=[]){
+ calls.push({sql,params});
+ let rows=sql.includes('org_id=$1')?ledger.filter(r=>r.org_id===params[0]):ledger.filter(r=>r.user_id===params[0] && r.org_id===null);
+ if(sql.includes('1=0')) rows=[];
+ else if(sql.includes('cost_center_id = any')) rows=rows.filter(r=>params[1].includes(r.cost_center_id));
+ return {rows};
+}};
+const personal=await financialTransactions(db,{userId:'user',orgId:null});
+assert.equal(personal.rows.length,201);assert.equal(personal.rows.some(r=>r.id==='other'),false);
+assert.doesNotMatch(calls[0].sql,/\blimit\b|\boffset\b/i);
+assert.deepEqual((await financialTransactions(db,{userId:'user',orgId:'org',allowedCCs:['cc']})).rows.map(r=>r.id),['org-visible']);
+assert.deepEqual((await financialTransactions(db,{userId:'user',orgId:'org',allowedCCs:[]})).rows,[]);
+console.log('financial full-ledger scoped tests passed');

@@ -98,6 +98,12 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
+    const remainingAmount = Math.max(0, Math.round(Number(bill.amount) * 100) - Math.round(Number(bill.paid_amount || 0) * 100)) / 100;
+    if (!Number.isFinite(remainingAmount) || remainingAmount <= 0) {
+      await client.query('ROLLBACK');
+      respond(res, 409, { error: 'bill_already_paid' });
+      return;
+    }
     const txId = crypto.randomUUID();
     const updateResult = await client.query(
       'update public.payables set status=$1, transaction_id=$2, paid_amount=$3, updated_at=now() where id=$4 and status=$5 returning id',
@@ -113,7 +119,7 @@ export default async function handler(req: any, res: any) {
       `insert into public.transactions
        (id,user_id,date,account_id,transaction_type,category,description,amount,cost_center_id,org_id)
        values($1,$2,current_date,$3,$4,$5,$6,$7,$8,$9)`,
-      [txId, userId, params.accountId, 'Saída', bill.category || 'Pagamento', `Pagamento: ${bill.title}`, bill.amount, bill.cost_center_id, orgId],
+      [txId, userId, params.accountId, 'Saída', bill.category || 'Pagamento', `Pagamento: ${bill.title}`, remainingAmount, bill.cost_center_id, orgId],
     );
     await client.query('COMMIT');
     respond(res, 200, { success: true, transactionId: txId });

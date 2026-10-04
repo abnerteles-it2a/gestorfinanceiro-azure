@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { useFinancialData } from '../context/FinancialDataContext';
 import { AssetType } from '../types';
+import { aggregateHoldings, compoundReturn, historicalPortfolioReturn } from '../utils/investmentAnalytics';
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
@@ -244,12 +245,10 @@ export const PerformancePanel: React.FC = () => {
   const [searchError, setSearchError] = useState('');
   const [trend, setTrend] = useState<ReturnType<typeof linearRegression>>(null);
 
-  const b3Invs = investments.filter(i => /\d{1,2}$/.test(i.ticker));
-  const b3Tickers = b3Invs.map(i => i.ticker);
-
-  const totalCost = b3Invs.reduce((a, i) => a + i.purchasePrice * i.quantity, 0);
-  const weights: Record<string, number> = {};
-  b3Invs.forEach(i => { weights[i.ticker] = totalCost > 0 ? (i.purchasePrice * i.quantity) / totalCost : 0; });
+  const b3Invs = useMemo(() => investments.filter(i => /\d{1,2}$/.test(i.ticker)), [investments]);
+  const groupedHoldings = useMemo(() => aggregateHoldings(b3Invs), [b3Invs]);
+  const b3Tickers = groupedHoldings.map(i => i.ticker);
+  const weights = Object.fromEntries(groupedHoldings.map(i => [i.ticker, i.weight]));
 
   const load = useCallback(async () => {
     if (!b3Tickers.length) return;
@@ -316,7 +315,7 @@ export const PerformancePanel: React.FC = () => {
       ? (rawIbov.find(h => h.date.slice(0, 7) === months[0])?.close ?? rawIbov[0]?.close ?? 1)
       : null;
     const searchBase = searchSeries[0]?.close || 1;
-    let cdiAcc = 0;
+    const cdiRates: number[] = [];
 
     return months.map(month => {
       // ── IBOV / BOVA11
@@ -328,8 +327,8 @@ export const PerformancePanel: React.FC = () => {
       }
 
       // ── CDI accumulated (robust date match)
-      const cdiM = rawCdi.find(c => c.date.slice(0, 7) === month);
-      if (cdiM) cdiAcc += cdiM.value;
+      cdiRates.push(...rawCdi.filter(c => c.date.slice(0, 7) === month).map(c => c.value));
+      const cdiAcc = compoundReturn(cdiRates);
 
       // ── Searched ticker
       let searchedRet: number | undefined;
@@ -341,14 +340,7 @@ export const PerformancePanel: React.FC = () => {
       // ── Portfolio (weighted consolidada or single ticker)
       let portfolioRet: number | undefined;
       if (selectedTicker === 'consolidada') {
-        let portRet = 0; let wc = 0;
-        b3Tickers.forEach(ticker => {
-          const s = rawPortfolio[ticker] || [];
-          const base = s[0]?.close || 0;
-          const cur = s.find(h => h.date.slice(0, 7) === month)?.close;
-          if (base > 0 && cur) { portRet += ((cur / base) - 1) * 100 * (weights[ticker] || 0); wc++; }
-        });
-        if (wc > 0) portfolioRet = parseFloat(portRet.toFixed(2));
+        portfolioRet = historicalPortfolioReturn(rawPortfolio, weights, month);
       } else {
         const s = rawPortfolio[selectedTicker] || [];
         const base = s[0]?.close || 0;
@@ -364,7 +356,7 @@ export const PerformancePanel: React.FC = () => {
         searched:  searchedRet  !== undefined ? parseFloat(searchedRet.toFixed(2))  : undefined,
       };
     });
-  }, [rawPortfolio, rawIbov, rawCdi, selectedTicker, searchSeries]);
+  }, [rawPortfolio, rawIbov, rawCdi, selectedTicker, searchSeries, groupedHoldings]);
 
 
   // "Posição Real" — uses purchase price from user's records vs current market price
@@ -375,8 +367,8 @@ export const PerformancePanel: React.FC = () => {
         const currentPrice = marketData[i.ticker]?.price || 0;
         const realRet = currentPrice > 0 ? ((currentPrice / i.purchasePrice) - 1) * 100 : 0;
         const purchaseMonth = i.purchaseDate?.slice(0, 7) || '';
-        const cdiSincePurchase = rawCdi.filter(c => c.date >= purchaseMonth).reduce((s, c) => s + c.value, 0);
-        return { ticker: i.ticker, purchasePrice: i.purchasePrice, currentPrice, purchaseDate: i.purchaseDate, realRet, cdiSincePurchase, delta: realRet - cdiSincePurchase };
+        const cdiSincePurchase = compoundReturn(rawCdi.filter(c => c.date.slice(0, 7) > purchaseMonth).map(c => c.value));
+        return { id: i.id, ticker: i.ticker, purchasePrice: i.purchasePrice, currentPrice, purchaseDate: i.purchaseDate, realRet, cdiSincePurchase, delta: realRet - cdiSincePurchase };
       })
       .sort((a, b) => b.realRet - a.realRet);
   }, [b3Invs, marketData, rawCdi]);
@@ -512,7 +504,7 @@ export const PerformancePanel: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
                 {realPositions.map(p => (
-                  <tr key={p.ticker} className="bg-teal-50/15 hover:bg-teal-100/25 dark:bg-teal-950/5 dark:hover:bg-teal-950/10 transition-colors">
+                  <tr key={p.id} className="bg-teal-50/15 hover:bg-teal-100/25 dark:bg-teal-950/5 dark:hover:bg-teal-950/10 transition-colors">
                     <td className="px-4 py-3 font-black text-[12px] text-slate-900 dark:text-white">{p.ticker}</td>
                     <td className="px-4 py-3 text-[11px] text-slate-500 dark:text-slate-300 text-right tabular-nums">
                       {p.purchaseDate ? new Date(p.purchaseDate).toLocaleDateString('pt-BR') : '—'}

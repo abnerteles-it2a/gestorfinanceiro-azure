@@ -25,7 +25,7 @@ import { RecentTransactionsWidget } from './RecentTransactionsWidget';
 import { PredictiveInsightsWidget } from './PredictiveInsightsWidget';
 
 const Dashboard: React.FC = () => {
-    const { totalBalance, netWorth, transactions, accounts, categories, isPrivacyMode, investments, planInfo, organizationInfo, isMei, capabilities, viewMode } = useFinancialData();
+    const { totalBalance, netWorth, financialTransactions: transactions, accounts, categories, isPrivacyMode, investments, planInfo, organizationInfo, isMei, capabilities, viewMode } = useFinancialData();
 
     
     // Use backend-driven capabilities

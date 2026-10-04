@@ -1,7 +1,7 @@
 
 
 
-import React, { createContext, useContext, useState, useMemo, useEffect } from 'react';
+import React, { createContext, useContext, useState, useMemo, useEffect, useRef } from 'react';
 
 import { useAuth } from './AuthContext';
 import type { BankAccount, Transaction, Investment, Category, FixedIncomeInvestment, Goal, Recurrence, CostCenter, UserPreferences } from '../types';
@@ -10,6 +10,10 @@ import { getMarketData, subscribeToMarketUpdates } from '../services/marketDataS
 import type { MarketData, MarketDataResponse } from '../services/marketDataService';
 import { useToast } from './ToastContext';
 import { toIsoLocalDate } from '../utils/formatters';
+import { advisorCacheKeys } from '../utils/advisorSession';
+import { balancesFromSnapshot } from '../utils/financialSnapshot';
+import { createInvestmentOperationController, sendInvestmentDisposal } from '../utils/investmentOperationClient';
+import type { InvestmentDisposalRequest, InvestmentDisposalResult } from '../types';
 
 export interface PlanCapabilities {
     canAccessInvestments: boolean;
@@ -123,6 +127,7 @@ export interface SubscriptionInfo {
 interface FinancialDataContextType {
     accounts: BankAccount[];
     transactions: Transaction[];
+    financialTransactions: Transaction[];
     investments: Investment[];
     fixedIncomeInvestments: FixedIncomeInvestment[];
     categories: Category[];
@@ -147,6 +152,7 @@ interface FinancialDataContextType {
     isMei: boolean;
     toggleMei: () => void;
     appendTransactionsLocal?: (txs: Transaction[]) => void;
+    disposeInvestment: (request: InvestmentDisposalRequest) => Promise<InvestmentDisposalResult>;
     addInvestment: (investment: Omit<Investment, 'id'>) => Promise<void>;
     updateInvestment: (id: string, updates: Partial<Investment>) => Promise<void>;
     deleteInvestment: (id: string) => Promise<void>;
@@ -225,6 +231,10 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
         if (!user) return [];
         return loadFromStorage('transactions', defaultData.transactions);
     });
+    const [financialTransactions, setFinancialTransactions] = useState<Transaction[]>([]);
+    const [financialBaseline, setFinancialBaseline] = useState<Transaction[]>([]);
+    const [balanceSnapshot, setBalanceSnapshot] = useState<{ balances: Record<string, number>; baseline: Transaction[] } | null>(null);
+    const [transactionCursor, setTransactionCursor] = useState<{ date: string; createdAt: string; id: string } | null>(null);
     const [investments, setInvestments] = useState<Investment[]>(() => {
         if (!user) return [];
         return loadFromStorage('investments', defaultData.investments);
@@ -259,6 +269,15 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
     const [hasMoreTransactions, setHasMoreTransactions] = useState<boolean>(false);
     const [organizationInfo, setOrganizationInfo] = useState<{ id?: string; name?: string; seats?: number; usedSeats?: number } | null>(null);
     const [orgRole, setOrgRole] = useState<string | null>(null);
+    // Render-time identity changes invalidate responses even before effect cleanup runs.
+    const scopeKey = `${user?.id || ''}:${viewMode}`;
+    const scopeRef = useRef({ key: scopeKey, epoch: 0 });
+    const dataGenerationRef = useRef(0);
+    if (scopeRef.current.key !== scopeKey) {
+        scopeRef.current = { key: scopeKey, epoch: scopeRef.current.epoch + 1 };
+        dataGenerationRef.current++;
+    }
+    const disposalControllersRef = useRef(new Map<string, ReturnType<typeof createInvestmentOperationController>>());
     const [planInfo, setPlanInfo] = useState<{ id?: string; name?: string; tier?: string; seats?: number; limits?: { transactions?: number; storage?: string } } | null>(() => loadFromStorage('planInfo', null));
     const [subscriptionInfo, setSubscriptionInfo] = useState<SubscriptionInfo | null>(() => loadFromStorage('subscriptionInfo', null));
     const [userPreferences, setUserPreferences] = useState<UserPreferences>(() => loadFromStorage('userPreferences', {}));
@@ -346,8 +365,58 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
         } catch (e) { console.error(e); return { error: e }; }
     };
 
+    const disposeInvestment = (request: InvestmentDisposalRequest): Promise<InvestmentDisposalResult> => {
+        const identity = { ...scopeRef.current };
+        const controllerKey = `${identity.epoch}:${request.operationId}`;
+        let controller = disposalControllersRef.current.get(controllerKey);
+        if (!controller) {
+            const isCurrent = () => scopeRef.current.key === identity.key && scopeRef.current.epoch === identity.epoch;
+            controller = createInvestmentOperationController({
+                isCurrent,
+                isRemote: () => dbProvider === 'neon' && !!user,
+                execute: async payload => {
+                    const headers = await getAuthHeaders();
+                    if (!isCurrent()) throw new Error('Usuário ou visão alterados.');
+                    return sendInvestmentDisposal(payload, headers);
+                },
+                reconcile: async () => {
+                    const generation = ++dataGenerationRef.current;
+                    const headers = await getAuthHeaders();
+                    if (!isCurrent()) throw new Error('Usuário ou visão alterados.');
+                    const response = await fetch('/api/bootstrap', { headers, cache: 'no-store' });
+                    if (!response.ok) throw new Error(`Atualização financeira indisponível (${response.status}).`);
+                    const data = await response.json();
+                    if (!isCurrent() || generation !== dataGenerationRef.current) throw new Error('Atualização substituída por outra visão ou carregamento.');
+                    if (!Array.isArray(data.investments) || !Array.isArray(data.fixed_income_investments) || !Array.isArray(data.transactions) || !Array.isArray(data.financial_transactions) || !Array.isArray(data.accounts) || !Array.isArray(data.financial_snapshot?.accounts)) throw new Error('Snapshot financeiro incompleto; atualização pendente.');
+                    const mapTransaction = (row: any): Transaction => ({ id: row.id, date: row.date, accountId: row.account_id, toAccountId: row.to_account_id || undefined, transactionType: row.transaction_type, category: row.category, description: row.description || '', amount: Number(row.amount || 0), paymentMethod: row.payment_method || '', costCenterId: row.cost_center_id || undefined, isBusinessRevenue: !!row.is_business_revenue, isBusinessExpense: !!row.is_business_expense });
+                    const txList = data.transactions.map(mapTransaction);
+                    // Publish one authoritative load together; replay rows are historical, never restored.
+                    setInvestments(data.investments.map((row: any) => ({ id: row.id, type: row.type, ticker: row.ticker || '', quantity: Number(row.quantity || 0), purchasePrice: Number(row.purchase_price || 0), purchaseDate: row.purchase_date || '' })));
+                    setFixedIncomeInvestments(data.fixed_income_investments.map((row: any) => ({ id: row.id, type: AssetType.FIXED_INCOME, name: row.name, issuer: row.issuer || '', amountInvested: Number(row.amount_invested || 0), yieldRate: row.yield_rate || '', purchaseDate: row.purchase_date || '', maturityDate: row.maturity_date || '' })));
+                    setAccounts(data.accounts.map((row: any) => ({ id: row.id, name: row.name, bank: row.bank || '', initialBalance: Number(row.initial_balance || 0) })));
+                    setTransactions(txList);
+                    setFinancialBaseline(txList);
+                    setFinancialTransactions(data.financial_transactions.map(mapTransaction));
+                    setBalanceSnapshot({ balances: Object.fromEntries(data.financial_snapshot.accounts.map((account: any) => [account.id, Number(account.balance)])), baseline: txList });
+                    setHasMoreTransactions(txList.length >= 50);
+                    setTransactionCursor(null);
+                    if (Array.isArray(data.categories)) setCategories(data.categories.map((row: any) => ({ id: row.id, name: row.name, type: row.type, icon: row.icon || '', meiCategory: row.mei_category || undefined })));
+                },
+            });
+            disposalControllersRef.current.set(controllerKey, controller);
+        }
+        return controller.submit(request).then(result => {
+            if (result.status === 'success' || (result.status === 'error' && result.rejected)) disposalControllersRef.current.delete(controllerKey);
+            return result;
+        });
+    };
+
     useEffect(() => {
+        const generation = ++dataGenerationRef.current;
+        const identity = { ...scopeRef.current };
         if (!user) return;
+        setBalanceSnapshot(null);
+        setTransactionCursor(null);
         (async () => {
             try {
                 const uid = user.id;
@@ -369,6 +438,7 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
                     (dbProvider === 'neon') ? fetch(`/api/bootstrap?userId=${encodeURIComponent(uid)}&t=${Date.now()}`, { headers: await getAuthHeaders() }).then(r => r.ok ? r.json() : null).catch(() => null) : Promise.resolve(null)
                 ]);
 
+                if (generation !== dataGenerationRef.current || scopeRef.current.key !== identity.key || scopeRef.current.epoch !== identity.epoch) return;
                 if (bootRes) {
                     const j = bootRes;
                     if (j.organization) setOrganizationInfo({ id: j.organization.id, name: j.organization.name, seats: Number(j.organization.seats || 0), usedSeats: Number(j.organization.usedSeats ?? 0) });
@@ -446,7 +516,22 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
                             isBusinessRevenue: !!r.is_business_revenue, isBusinessExpense: !!r.is_business_expense
                         }));
                         setTransactions(txList);
-                        setHasMoreTransactions(txList.length === 500);
+                        setFinancialBaseline(txList);
+                        if (Array.isArray(j.financial_transactions)) {
+                            setFinancialTransactions(j.financial_transactions.map((row: any) => ({ id: row.id, date: row.date, accountId: row.account_id, toAccountId: row.to_account_id || undefined, transactionType: row.transaction_type, category: row.category, description: row.description || '', amount: Number(row.amount || 0), paymentMethod: row.payment_method || '', costCenterId: row.cost_center_id || undefined, isBusinessRevenue: !!row.is_business_revenue, isBusinessExpense: !!row.is_business_expense })));
+                        } else {
+                            setFinancialTransactions(txList);
+                        }
+                        setHasMoreTransactions(!!j.transactions_meta?.hasMore);
+                        setTransactionCursor(j.transactions_meta?.nextCursor || null);
+                        if (Array.isArray(j.financial_snapshot?.accounts)) {
+                            setBalanceSnapshot({
+                                balances: Object.fromEntries(j.financial_snapshot.accounts.map((account: any) => [account.id, Number(account.balance)])),
+                                baseline: txList,
+                            });
+                        } else {
+                            setBalanceSnapshot(null);
+                        }
                     }
                     if (Array.isArray(j.categories)) {
                         const catList = j.categories.map((r: any) => ({ id: r.id, name: r.name, type: r.type, icon: r.icon || '', meiCategory: r.mei_category || undefined }));
@@ -545,6 +630,7 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
                 // Bootstrap logic now parallelized in the main Promise.all block above.
             } catch (e) { console.error(e); }
         })();
+        return () => { if (dataGenerationRef.current === generation) dataGenerationRef.current++; };
     }, [user?.id, refreshTrigger, viewMode]);
 
     const executeAdvisorAction = async (actionType: string, params: any) => {
@@ -574,14 +660,16 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
 
     // AI Insights Session-based Effect
     useEffect(() => {
-        if (!user) return;
+        setAiInsights([]);
+        if (!user) { setIsAiLoading(false); return; }
+        const controller = new AbortController();
+        let active = true;
 
         const fetchInsights = async () => {
             try {
-                // Cache versioning - bump this when proactive.ts logic changes
-                const INSIGHTS_CACHE_VERSION = 'v4';
-                const cacheKey = `gf_ai_insights_data_${INSIGHTS_CACHE_VERSION}_${viewMode}_${organizationInfo?.id || 'personal'}`;
-                const hasFetchedKey = `gf_ai_insights_fetched_${INSIGHTS_CACHE_VERSION}_${viewMode}_${organizationInfo?.id || 'personal'}`;
+                const keys = advisorCacheKeys(user.id, viewMode, organizationInfo?.id);
+                const cacheKey = keys.data;
+                const hasFetchedKey = keys.fetched;
                 const hasFetched = sessionStorage.getItem(hasFetchedKey);
                 const isManualRefresh = refreshTrigger > 0;
                 
@@ -597,8 +685,9 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
                 setIsAiLoading(true);
                 const headers = await getAuthHeaders();
                 headers['x-view-mode'] = viewMode;
-                const res = await fetch('/api/ai/proactive', { 
-                    method: 'POST', 
+                const res = await fetch('/api/ai/proactive', {
+                    method: 'POST',
+                    signal: controller.signal,
                     headers,
                     body: JSON.stringify({ 
                         orgId: viewMode === 'organization' ? organizationInfo?.id : null, 
@@ -608,20 +697,21 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
                 
                 if (res.ok) {
                     const data = await res.json();
-                    if (data.insights && Array.isArray(data.insights)) {
+                    if (active && data.insights && Array.isArray(data.insights)) {
                         setAiInsights(data.insights);
                         sessionStorage.setItem(hasFetchedKey, 'true');
                         sessionStorage.setItem(cacheKey, JSON.stringify(data.insights));
                     }
                 }
             } catch (err) {
-                console.error('Advisor: AI Insight fetch failed.', err);
+                if (active) console.error('Advisor: AI Insight fetch failed.', err);
             } finally {
-                setIsAiLoading(false);
+                if (active) setIsAiLoading(false);
             }
         };
 
         fetchInsights();
+        return () => { active = false; controller.abort(); };
     }, [user?.id, refreshTrigger, viewMode, organizationInfo?.id]);
 
     useEffect(() => {
@@ -629,6 +719,10 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
         try {
             setAccounts([]);
             setTransactions([]);
+            setBalanceSnapshot(null);
+            setTransactionCursor(null);
+            setFinancialTransactions([]);
+            setFinancialBaseline([]);
             setInvestments([]);
             setFixedIncomeInvestments([]);
             setCategories([]);
@@ -665,18 +759,33 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
             const PAGE = 300;
             try {
                 const headers = await getAuthHeaders();
-                const r = await fetch('/api/query', { method: 'POST', headers, body: JSON.stringify({ type: 'transactions_list', data: { limit: PAGE, offset: current } }) });
+                const r = await fetch('/api/query', { method: 'POST', headers, body: JSON.stringify({ type: 'transactions_list', data: { limit: PAGE, ...(transactionCursor ? { cursor: transactionCursor } : { offset: current }) } }) });
                 const j = await r.json();
                 const rows: any[] = (j.rows || []);
                 if (!rows.length) { setHasMoreTransactions(false); return; }
                 const appended = rows.map((r: any) => ({ id: r.id, date: r.date, accountId: r.account_id, toAccountId: r.to_account_id || undefined, transactionType: r.transaction_type, category: r.category, description: r.description || '', amount: Number(r.amount || 0), paymentMethod: r.payment_method || '', costCenterId: r.cost_center_id || undefined, isBusinessRevenue: !!r.is_business_revenue, isBusinessExpense: !!r.is_business_expense }));
-                setTransactions(prev => [...prev, ...appended]);
-                setHasMoreTransactions(rows.length === PAGE);
+                setTransactions(prev => {
+                    const existing = new Set(prev.map(transaction => transaction.id));
+                    return [...prev, ...appended.filter(transaction => !existing.has(transaction.id))];
+                });
+                setBalanceSnapshot(prev => {
+                    if (!prev) return prev;
+                    const existing = new Set(prev.baseline.map(transaction => transaction.id));
+                    return { ...prev, baseline: [...prev.baseline, ...appended.filter(transaction => !existing.has(transaction.id))] };
+                });
+                setFinancialBaseline(prev => {
+                    const existing = new Set(prev.map(transaction => transaction.id));
+                    return [...prev, ...appended.filter(transaction => !existing.has(transaction.id))];
+                });
+                const meta = j.transactions_meta || j;
+                setTransactionCursor(meta.nextCursor || null);
+                setHasMoreTransactions(typeof meta.hasMore === 'boolean' ? meta.hasMore : rows.length === PAGE);
             } catch {}
         }
     };
 
     const loadOlderTransactions = async () => {
+        if (dbProvider === 'neon') { await loadMoreTransactions(); return; }
         if (!user || transactions.length === 0) return;
         const oldest = transactions.reduce((min, t) => {
             const d = new Date(t.date).getTime();
@@ -811,6 +920,7 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
                 const row = (j.rows || [])[0];
                 if (!row) { showToast('Conta não retornada pela Neon.', 'error'); return; }
                 setAccounts(prev => [...prev, { id: row.id, name: row.name, bank: row.bank || '', initialBalance: Number(row.initial_balance || 0) }]);
+                setBalanceSnapshot(prev => prev ? { ...prev, balances: { ...prev.balances, [row.id]: Number(row.initial_balance || 0) } } : prev);
             } else {
                 setAccounts(prev => [...prev, { ...account, id: new Date().toISOString() }]);
             }
@@ -827,6 +937,10 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
             if (!r.ok) { showToast('Falha ao atualizar conta na Neon.', 'error'); return; }
 
         }
+        if (updates.initialBalance !== undefined) {
+            const oldInitialBalance = accounts.find(account => account.id === id)?.initialBalance || 0;
+            setBalanceSnapshot(prev => prev ? { ...prev, balances: { ...prev.balances, [id]: Math.round(((prev.balances[id] || 0) + updates.initialBalance! - oldInitialBalance) * 100) / 100 } } : prev);
+        }
         setAccounts(prev => prev.map(acc => acc.id === id ? { ...acc, ...updates } : acc));
         showToast('Conta atualizada!', 'success');
     };
@@ -838,6 +952,12 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
 
         }
         setAccounts(prev => prev.filter(acc => acc.id !== id));
+        setBalanceSnapshot(prev => {
+            if (!prev) return prev;
+            const balances = { ...prev.balances };
+            delete balances[id];
+            return { ...prev, balances };
+        });
         showToast('Conta removida.', 'info');
     };
 
@@ -846,8 +966,7 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
             const j = await callApi('transactions_insert', { date: transaction.date, accountId: transaction.accountId, toAccountId: transaction.toAccountId ?? null, transactionType: transaction.transactionType, category: transaction.category, description: transaction.description ?? null, amount: transaction.amount, paymentMethod: transaction.paymentMethod ?? null, costCenterId: transaction.costCenterId ?? null, isBusinessRevenue: transaction.isBusinessRevenue ?? false, isBusinessExpense: transaction.isBusinessExpense ?? false });
             
             if (j.error) {
-                setTransactions(prev => [...prev, { ...transaction, id: new Date().toISOString() }].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-                showToast('Lançamento adicionado no dispositivo.', 'info');
+                showToast('Lançamento não foi salvo. Corrija o erro antes de tentar novamente.', 'error');
                 return;
             }
             const rrow = (j.rows || [])[0];
@@ -888,13 +1007,17 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
     const appendTransactionsLocal = (txs: Transaction[]) => {
         try {
             if (!Array.isArray(txs) || txs.length === 0) return;
-            setTransactions(prev => [...txs, ...prev].sort((a,b)=> new Date(b.date).getTime() - new Date(a.date).getTime()));
+            setTransactions(prev => {
+                const existing = new Set(prev.map(transaction => transaction.id));
+                return [...txs.filter(transaction => !existing.has(transaction.id)), ...prev].sort((a,b)=> new Date(b.date).getTime() - new Date(a.date).getTime());
+            });
         } catch {}
     };
 
     const addTransactionsBatch = async (items: Omit<Transaction, 'id'>[]): Promise<number> => {
         if (!items || items.length === 0) return 0;
         let insertedCount = 0;
+        let failedCount = 0;
         const newLocalTxs: Transaction[] = [];
 
         for (const transaction of items) {
@@ -935,6 +1058,8 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
                 } catch (e) {
                     console.error("Batch insert item error:", e);
                 }
+                failedCount++;
+                continue;
             }
             newLocalTxs.push({
                 ...transaction,
@@ -944,7 +1069,11 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
         }
 
         setTransactions(prev => [...newLocalTxs, ...prev].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-        showToast(`${insertedCount} lançamento(s) importado(s) com sucesso!`, 'success');
+        if (failedCount > 0) {
+            showToast(`${insertedCount} lançamento(s) confirmado(s); ${failedCount} não foram salvos. Tente novamente os itens rejeitados.`, 'error');
+        } else {
+            showToast(`${insertedCount} lançamento(s) importado(s) com sucesso!`, 'success');
+        }
         return insertedCount;
     };
 
@@ -963,7 +1092,7 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
     const updateInvestment = async (id: string, updates: Partial<Investment>) => {
         if (user) {
             const headers = await getAuthHeaders();
-            const r = await fetch('/api/query', { method: 'POST', headers, body: JSON.stringify({ type: 'investments_update', data: { id, type: updates.type ?? null, ticker: updates.ticker ?? null, quantity: updates.quantity ?? null, purchasePrice: updates.purchasePrice ?? null, purchaseDate: updates.purchaseDate ?? null } }) });
+            const r = await fetch('/api/query', { method: 'POST', headers, body: JSON.stringify({ type: 'investments_update', data: { id, ...updates } }) });
             if (!r.ok) { showToast('Falha ao atualizar investimento na Neon.', 'error'); return; }
         }
         setInvestments(prev => prev.map(inv => (inv.id === id ? { ...inv, ...updates } : inv)));
@@ -1000,7 +1129,7 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
         try {
             if (user) {
                 const headers = await getAuthHeaders();
-                const r = await fetch('/api/query', { method: 'POST', headers, body: JSON.stringify({ type: 'fixed_income_update', data: { id, name: updates.name, issuer: updates.issuer ?? null, amountInvested: updates.amountInvested, yieldRate: updates.yieldRate ?? null, purchaseDate: updates.purchaseDate ?? null, maturityDate: updates.maturityDate ?? null } }) });
+                const r = await fetch('/api/query', { method: 'POST', headers, body: JSON.stringify({ type: 'fixed_income_update', data: { id, ...updates } }) });
                 if (!r.ok) { showToast('Falha ao atualizar renda fixa na Neon.', 'error'); return; }
             }
             setFixedIncomeInvestments(prev => prev.map(inv => (inv.id === id ? { ...inv, ...updates } : inv)));
@@ -1374,6 +1503,7 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
 
     // --- MEMOIZED CALCULATIONS ---
     const accountBalances = useMemo(() => {
+        if (balanceSnapshot) return balancesFromSnapshot(balanceSnapshot.balances, balanceSnapshot.baseline, transactions);
         const balances: Record<string, number> = {};
         accounts.forEach(acc => {
             balances[acc.id] = Number(acc.initialBalance || 0);
@@ -1406,7 +1536,7 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
             balances[id] = Number(balances[id].toFixed(2));
         });
         return balances;
-    }, [accounts, transactions]);
+    }, [accounts, transactions, balanceSnapshot]);
 
     const totalBalance = useMemo(() => Object.values(accountBalances).reduce((sum: number, balance: number) => sum + balance, 0), [accountBalances]);
 
@@ -1530,6 +1660,7 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
     const value: FinancialDataContextType = {
         accounts: accountsWithCurrentBalance,
         transactions,
+        financialTransactions: [...new Map(financialTransactions.filter(transaction => !financialBaseline.some(original => original.id === transaction.id)).concat(transactions).map(transaction => [transaction.id, transaction])).values()],
         investments,
         fixedIncomeInvestments,
         categories,
@@ -1556,6 +1687,7 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
         updateTransaction,
         deleteTransaction,
         appendTransactionsLocal,
+        disposeInvestment,
         addInvestment,
         updateInvestment,
         deleteInvestment,

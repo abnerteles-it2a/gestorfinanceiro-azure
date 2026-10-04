@@ -1,27 +1,49 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-// Core financial valuation formulas used across marketDataService and InvestmentSimulator
-export function calculatePvp(price: number, vpa: number): number | null {
-  if (vpa <= 0 || price <= 0) return null;
-  return Number((price / vpa).toFixed(2));
-}
+import { calculateSpecializedValuation, detectAssetClass } from '../api/portfolio/market-data';
+import { calculatePvp, calculateBazinPrice, calculateGrahamPrice, calculateSafetyMargin } from './investmentValuation';
 
-export function calculateBazinPrice(dividends12m: number, minimumYieldRate: number = 6): number | null {
-  if (dividends12m <= 0 || minimumYieldRate <= 0) return null;
-  return Number((dividends12m / (minimumYieldRate / 100)).toFixed(2));
-}
+test('Valuation: non-finite fundamentals and overflow are unavailable rather than Infinity', () => {
+  assert.equal(calculatePvp(Infinity, 10), null);
+  assert.equal(calculateBazinPrice(NaN), null);
+  assert.equal(calculateGrahamPrice(1e300, 1e300), null);
+  assert.equal(calculateSafetyMargin(Infinity, 30), null);
+});
 
-export function calculateGrahamPrice(lpa: number, vpa: number): number | null {
-  if (lpa <= 0 || vpa <= 0) return null;
-  const product = 22.5 * lpa * vpa;
-  return Number(Math.sqrt(product).toFixed(2));
-}
+test('Production classification: B3 equity units are stocks, not FIIs', () => {
+  for (const ticker of ['TAEE11', 'SANB11', 'KLBN11', 'ALUP11', 'BPAC11']) assert.equal(detectAssetClass(ticker), 'STOCK');
+  assert.equal(detectAssetClass('MXRF11'), 'FII');
+});
 
-export function calculateSafetyMargin(ceilingPrice: number | null, currentPrice: number): number | null {
-  if (!ceilingPrice || currentPrice <= 0) return null;
-  return Number((((ceilingPrice - currentPrice) / currentPrice) * 100).toFixed(1));
-}
+test('Production valuation: observed zero and future/undated payments never fall back to benchmarks', () => {
+  const value = calculateSpecializedValuation('PETR4', 30, 'STOCK', { earningsPerShare: 0, lpa: 4, bookValuePerShare: 0, vpa: 25, dividends12m: 0 });
+  assert.equal(value.lpa, 0);
+  assert.equal(value.vpa, 0);
+  assert.equal(value.dividends12m, 0);
+  assert.equal(value.grahamPrice, null);
+  assert.equal(value.bazinPrice, null);
+  const payments = calculateSpecializedValuation('UNKNOWN3', 30, 'STOCK', { dividendsData: { cashDividends: [
+    { paymentDate: '2026-01-01', rate: 3 },
+    { paymentDate: '2027-01-01', rate: 100 },
+    { rate: 100 },
+    { paymentDate: '2024-01-01', rate: 100 },
+  ] } }, undefined, new Date('2026-06-01T00:00:00Z'));
+  assert.equal(payments.dividends12m, 3);
+  assert.equal(payments.bazinPrice, 50);
+});
+
+test('Production valuation: absent fundamentals do not manufacture dividend yields or fair values', () => {
+  for (const ticker of ['UNKNOWN3', 'PETR4', 'MXRF11']) {
+    const value = calculateSpecializedValuation(ticker, 30, detectAssetClass(ticker), {});
+    assert.equal(value.dividends12m, null);
+    assert.equal(value.pvp, null);
+    assert.equal(value.grahamPrice, null);
+    assert.equal(value.bazinPrice, null);
+    assert.equal(value.fiiCeilingPrice, null);
+    assert.equal(value.signal, 'Manter');
+  }
+});
 
 test('Valuation: P/VP Calculation', () => {
   // Test dynamic calculation (must NOT be hardcoded 0.98)

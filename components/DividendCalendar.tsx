@@ -1,19 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { useFinancialData } from '../context/FinancialDataContext';
+import { projectDividendCalendar } from '../utils/investmentReporting';
 import { formatCurrency, formatPercentage } from '../utils/formatters';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
 import { SparklesIcon, TrendingUpIcon, WalletIcon } from './icons';
-
-interface ScheduledDividend {
-  id: string;
-  ticker: string;
-  type: 'Dividendo' | 'JCP' | 'Rendimento FII';
-  amountPerShare: number;
-  totalAmount: number;
-  dataCom: string;
-  dataPag: string;
-  status: 'confirmado' | 'previsto';
-}
 
 export const DividendCalendar: React.FC = () => {
   const { investments, marketData } = useFinancialData();
@@ -35,79 +25,10 @@ export const DividendCalendar: React.FC = () => {
     'VISC11': { type: 'Rendimento FII', months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], avgPerShare: 0.85 },
   };
 
-  // Generate scheduled list and monthly cash flow
-  const { upcomingDividends, monthlyCashFlow, totalAnnualProjected, snowballStats } = useMemo(() => {
-    const list: ScheduledDividend[] = [];
-    const monthlyTotals: Record<number, number> = {};
-    for (let m = 1; m <= 12; m++) monthlyTotals[m] = 0;
-
-    let annualSum = 0;
-    const snowballByAsset: { ticker: string; totalReceived: number; unitPrice: number; newShares: number }[] = [];
-
-    const now = new Date();
-    const curYear = now.getFullYear();
-
-    investments.forEach(inv => {
-      const ticker = String(inv.ticker || '').toUpperCase().trim();
-      const qty = Number(inv.quantity || 0);
-      if (qty <= 0) return;
-
-      const price = marketData[ticker]?.price || inv.purchasePrice || 10;
-      const pattern = SCHEDULE_PATTERNS[ticker] || {
-        type: ticker.endsWith('11') ? 'Rendimento FII' : 'Dividendo',
-        months: ticker.endsWith('11') ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] : [4, 8, 12],
-        avgPerShare: ticker.endsWith('11') ? price * 0.008 : (price * 0.06) / 3,
-      };
-
-      let assetAnnual = 0;
-
-      pattern.months.forEach(m => {
-        const amountPerShare = pattern.avgPerShare;
-        const total = amountPerShare * qty;
-        monthlyTotals[m] = (monthlyTotals[m] || 0) + total;
-        annualSum += total;
-        assetAnnual += total;
-
-        // Create scheduled entry for future months
-        if (m >= now.getMonth() + 1 && m <= now.getMonth() + 4) {
-          const comDay = 15;
-          const pagDay = ticker.endsWith('11') ? 14 : 28;
-          list.push({
-            id: `${ticker}-${m}`,
-            ticker,
-            type: pattern.type,
-            amountPerShare,
-            totalAmount: total,
-            dataCom: `${curYear}-${String(m).padStart(2, '0')}-${String(comDay).padStart(2, '0')}`,
-            dataPag: `${curYear}-${String(m).padStart(2, '0')}-${String(pagDay).padStart(2, '0')}`,
-            status: m === now.getMonth() + 1 ? 'confirmado' : 'previsto',
-          });
-        }
-      });
-
-      const newShares = price > 0 ? Math.floor(assetAnnual / price) : 0;
-      snowballByAsset.push({
-        ticker,
-        totalReceived: assetAnnual,
-        unitPrice: price,
-        newShares,
-      });
-    });
-
-    // Format chart data for 12 months
-    const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-    const chartData = Object.entries(monthlyTotals).map(([m, val]) => ({
-      month: monthNames[Number(m) - 1],
-      total: Math.round(val),
-    }));
-
-    return {
-      upcomingDividends: list.sort((a, b) => a.dataPag.localeCompare(b.dataPag)),
-      monthlyCashFlow: chartData,
-      totalAnnualProjected: annualSum,
-      snowballStats: snowballByAsset.sort((a, b) => b.totalReceived - a.totalReceived),
-    };
-  }, [investments, marketData]);
+  const { upcomingDividends, monthlyCashFlow, totalAnnualProjected, snowballStats } = useMemo(
+    () => projectDividendCalendar(investments, marketData, SCHEDULE_PATTERNS, new Date()),
+    [investments, marketData],
+  );
 
   const [activeSubView, setActiveSubView] = useState<'cronograma' | 'boladeneve'>('cronograma');
 
@@ -124,7 +45,7 @@ export const DividendCalendar: React.FC = () => {
               Cronograma Futuro de Proventos & Efeito Bola de Neve
             </h2>
             <p className="text-[11px] text-slate-500 font-medium">
-              Acompanhe as datas de corte (Data Com), pagamentos e o poder do reinvestimento passivo
+              Estimativas baseadas em hábitos históricos; não são anúncios de pagamento nem garantem direito a proventos
             </p>
           </div>
         </div>
@@ -185,7 +106,7 @@ export const DividendCalendar: React.FC = () => {
         <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
           <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-slate-400">
             <span>Próximos Pagamentos</span>
-            <span>Confirmados</span>
+            <span>Estimados</span>
           </div>
           <div className="text-2xl font-black text-slate-900 dark:text-white font-mono mt-1">
             {upcomingDividends.length} Lançamentos
@@ -233,7 +154,7 @@ export const DividendCalendar: React.FC = () => {
           <div className="bg-white dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700/60 overflow-hidden">
             <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-700/60 flex justify-between items-center">
               <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                Lançamentos Futuros e Datas de Corte
+                Projeções Futuras — Sem Datas de Corte Confirmadas
               </h4>
               <span className="text-[10px] text-slate-400 font-medium">Baseado na sua custódia</span>
             </div>
@@ -265,14 +186,10 @@ export const DividendCalendar: React.FC = () => {
                         <td className="px-5 py-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
                           {formatCurrency(item.totalAmount)}
                         </td>
-                        <td className="px-5 py-3 text-center text-slate-500 font-mono">{item.dataCom}</td>
+                        <td className="px-5 py-3 text-center text-slate-500 font-mono">{item.dataCom ?? '—'}</td>
                         <td className="px-5 py-3 text-center text-slate-900 dark:text-white font-mono font-bold">{item.dataPag}</td>
                         <td className="px-5 py-3 text-right">
-                          <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
-                            item.status === 'confirmado'
-                              ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
-                              : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
-                          }`}>
+                          <span className="inline-block px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-500">
                             {item.status}
                           </span>
                         </td>

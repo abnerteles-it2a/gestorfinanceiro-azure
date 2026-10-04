@@ -133,7 +133,7 @@ app.use((req, res, next) => {
 
 // Load API routes using Vite's import.meta.glob
 // This will be replaced by the actual modules during the Vite build
-const apiRoutes = import.meta.glob('./api/**/*.ts', { eager: true });
+const apiRoutes = import.meta.glob(['./api/**/*.ts', '!./api/**/*.test.ts', '!./api/**/*.spec.ts'], { eager: true });
 
 Object.entries(apiRoutes).forEach(([filePath, module]: [string, any]) => {
   // filePath is relative to the current file, e.g., "./api/foo.ts"

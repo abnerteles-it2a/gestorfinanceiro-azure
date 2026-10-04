@@ -23,4 +23,8 @@ Enquanto o Fluxo de Caixa acompanha o dinheiro que já entrou ou saiu da conta b
 - Quando o pagamento for realizado ou o valor cair na conta:
   1. Na lista de Contas a Pagar/Receber, localize o item.
   2. Clique no botão de ação **Liquidar / Baixar** (ícone de check).
-  3. O sistema marcará o título como `Liquidado` e, opcionalmente, gerará a transação de débito/crédito correspondente na conta bancária vinculada, mantendo o saldo 100% conciliado.
+  3. Informe o principal desta baixa e a conta bancária. A baixa gera o movimento financeiro correspondente e acumula o valor liquidado. O título permanece aberto enquanto houver saldo residual; somente a quitação completa altera o status para liquidado.
+  4. Descontos e encargos alteram o movimento de caixa, sem substituir o principal informado. O servidor valida saldo disponível da obrigação e permissões, e registra obrigação e movimento numa transação de banco.
+  5. Em falha de comunicação, a tela reutiliza o identificador da operação para evitar duplicação no retry. Confirme o resultado antes de iniciar uma operação nova.
+
+**Implantação:** as garantias de retry dependem da estrutura `obligation_settlements`, adicionada às migrações. A migração deve concluir antes das baixas na instalação atualizada. Os testes locais não substituem a verificação de concorrência em PostgreSQL isolado.
