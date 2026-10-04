@@ -67,7 +67,26 @@ O Gestor Financeiro possui mecanismo de segurança contra compartilhamento de co
 
 ---
 
-## 5. Como Atualizar e Fazer Re-deploy
+## 5. Deploy automático e preparação do banco
+
+Push em `staging` dispara validação, build no ACR e atualização de `ca-gestor-staging`. Push em outras branches não implanta. O workflow usa OIDC através do environment GitHub `staging`, restrito à branch `staging`; não requer `AZURE_CREDENTIALS`. As variáveis do environment são `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` e `AZURE_SUBSCRIPTION_ID`.
+
+A identidade dedicada `id-gh-gestor-staging` tem federação para este repositório/environment, permissão Container Registry Tasks Contributor no ACR e Container Apps Contributor somente no app alvo. A imagem usa `gestor-financeiro-staging:<SHA>` para identificar o commit implantado. Não conceder acesso de contribuição à subscription inteira.
+
+### Migração obrigatória antes da ativação
+O container **não executa migrações no startup**. O bootstrap autenticado tenta DDL de forma lazy, mas não constitui uma barreira confiável de migração. O endpoint de inicialização legado suprime erros e seu HTTP 200 não comprova sucesso.
+
+Para a entrega de integridade financeira, aplicar SQL aditivo revisado com falha explícita e verificar:
+- `public.investment_operations` e sua chave composta por escopo/operação;
+- `public.obligation_settlements` e unicidade de transaction_id;
+- colunas paid_amount/received_amount, transaction_id e updated_at nos títulos;
+- estruturas preexistentes auth_sessions, usage_tx_ledger e fiscal_documents.
+
+Usar conexão segura ao banco de staging, confirmar destino e executar em transação com `ON_ERROR_STOP`. Não usar senhas fixas de scripts/documentação nem considerar CREATE IF NOT EXISTS prova de estrutura compatível. Migração remota requer autorização específica.
+
+Depois de implantar, verificar imagem SHA, revisão pronta, tráfego e bootstrap autenticado no escopo esperado. Build verde sozinho não confirma atualização do banco ou fluxo financeiro.
+
+## 6. Alternativa manual (requer autorização de deploy)
 
 ```powershell
 # 1. Build da nova imagem no ACR (sem streaming de logs para evitar conflito UTF-8 no Windows)
