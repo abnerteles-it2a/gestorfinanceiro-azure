@@ -77,10 +77,19 @@ jobs:
         env:
           EXPECTED_IMAGE: acraiopsprodit2a.azurecr.io/gestor-financeiro-staging:${{ github.sha }}
         run: |
-          state=$(az containerapp show --name ca-gestor-staging --resource-group rg-aiops-prod --output json)
-          echo "$state" | jq -e --arg image "$EXPECTED_IMAGE" '
-            .properties.provisioningState == "Succeeded" and
-            .properties.latestRevisionName == .properties.latestReadyRevisionName and
-            any(.properties.template.containers[]; .image == $image)
-          ' >/dev/null
-          echo "$state" | jq '{revision: .properties.latestReadyRevisionName, images: [.properties.template.containers[].image], traffic: .properties.configuration.ingress.traffic}'
+          for i in {1..12}; do
+            state=$(az containerapp show --name ca-gestor-staging --resource-group rg-aiops-prod --output json)
+            if echo "$state" | jq -e --arg image "$EXPECTED_IMAGE" '
+              .properties.provisioningState == "Succeeded" and
+              .properties.latestRevisionName == .properties.latestReadyRevisionName and
+              any(.properties.template.containers[]; .image == $image)
+            ' >/dev/null 2>&1; then
+              echo "Deployment successfully verified on revision $(echo "$state" | jq -r .properties.latestReadyRevisionName)"
+              echo "$state" | jq '{revision: .properties.latestReadyRevisionName, images: [.properties.template.containers[].image], traffic: .properties.configuration.ingress.traffic}'
+              exit 0
+            fi
+            echo "Waiting for revision to become ready... attempt $i/12"
+            sleep 5
+          done
+          echo "Verification timeout reached"
+          exit 1
