@@ -72,6 +72,7 @@ export interface Transaction {
     toAccountId?: string;
     isBusinessRevenue?: boolean;
     isBusinessExpense?: boolean;
+    fitId?: string;
 }
 
 export interface CostCenter {

@@ -58,6 +58,28 @@ Limites: os testes atravessam os modules de produção com adapters controlados,
 ### Revisão de código desta etapa
 A skill code-review executada apontou problemas no mobile preexistente (venda adicionando lote, propagação de visão organizacional, confirmação de recebimento, totais/saldos parciais). Mobile ficou fora do ownership desta fatia e não foi alterado; esses achados não equivalem a validação nem correção do aplicativo mobile. A serialização por escopo limita concorrência entre comandos de desinvestimento; CRUD legado não participa desse lock, portanto não está abrangido pela garantia.
 
+### Correções Pós-Revisão de Código (Dois Eixos: Standards e Spec)
+1. **IA Proativa com Dedução de Baixas Parciais:**
+   - Em `api/ai/proactive.ts`, queries de contas a pagar e receber futuras (`upcomingObligations`, `futurePayables`, `futureReceivables`, `billsRes`) foram corrigidas para selecionar `(amount - COALESCE(paid_amount, 0))` e abranger `status IN ('open', 'partial')`, impedindo projeções infladas de face original. Teste unitário adicionado em `api/ai/proactive.test.ts`.
+2. **Execução de Pagamentos do Advisor Rastreável:**
+   - Em `api/ai/execute.ts`, a liquidação de contas a pagar passou a registrar o evento na tabela `public.obligation_settlements` e a calcular o saldo residual exato antes de baixar e debitar no caixa. Suporta contas parciais e abertas. Coberto por testes em `api/ai/execute.test.ts`.
+3. **Limpeza Arquitetural e Separação Client-Server:**
+   - Benchmarks fundamentais extraídos para `utils/b3Benchmarks.ts`, desacoplando o client web (`components/InvestmentSimulator.tsx` e `services/marketDataService.ts`) de módulos de servidor Node.js (`api/portfolio/market-data.ts`), eliminando avisos de módulos `http`/`https` externalizados no Vite build.
+   - Simulador agora consome funções puras de `utils/investmentValuation.ts` (`calculatePvp`, `calculateBazinPrice`, `calculateGrahamPrice`, `calculateSafetyMargin`), respeitando `CONTEXT.md` ao não fabricar dividendos a partir de yield sintético.
+4. **Idempotência FITID no Importador de Extratos:**
+   - Adicionada coluna `fit_id` e índice parcial em `public.transactions`. O backend em `api/query.ts` agora verifica duplicidades por `fit_id` e retorna resposta idempotente sem duplicar lançamentos ou estourar cotas.
+   - O modal `components/BankStatementImporterModal.tsx` e o parser `utils/bankStatementParser.ts` agora preservam e detectam duplicatas por FITID, com teste automatizado em `utils/bankStatementParser.test.ts`.
+5. **Integração de Cartão de Crédito e Ciclo de Faturas:**
+   - O modal `components/AddTransactionModal.tsx` foi integrado às regras de competência e ciclo de fechamento/vencimento de `utils/creditCard.ts`.
+   - Compras no crédito têm competência registrada na data do fato econômico e parcelas calculadas com precisão de centavos agendadas como obrigações na data de vencimento da respectiva fatura.
+6. **Migração Remota e Acesso Admin no PostgreSQL Azure:**
+   - Migração das tabelas `investment_operations` e `obligation_settlements` aplicada e verificada com sucesso no Azure PostgreSQL Flexible (`psql-aiops-prod-brsouth`).
+   - Usuário admin `abner.teles@it2a.com` criado com `is_admin = true` e perfil vinculado.
+7. **Estado da Suíte Global:**
+   - 110 testes automatizados (`npm test`) passando com zero falhas.
+   - Verificação estática de tipos (`npx tsc --noEmit`) aprovada com 0 erros.
+   - Build de produção cliente e servidor (`npm run build`) concluído com sucesso.
+
 ### Verificação intermediária
 A execução `npm test` durante o ciclo red da nova etapa encontrou duas falhas: resgate total manteve uma linha com principal zero em vez de removê-la, e o module cliente ainda não existia quando seu teste foi executado. O comando interrompeu antes do typecheck. Esse resultado não substitui os 81 testes aprovados da etapa anterior nem representa validação final da implementação nova.
 

@@ -148,9 +148,9 @@ export function createProactiveHandler(adapters: { db: ScopeDatabase; verifySess
 
           // Open Bills (Current Month)
           scopedQuery(`
-              SELECT id, title, amount, due_date, cost_center_id, status FROM public.payables
+              SELECT id, title, (amount - COALESCE(paid_amount, 0)) as amount, due_date, cost_center_id, status FROM public.payables
               WHERE ${queryFilter}
-              AND status='open' 
+              AND status IN ('open', 'partial')
               AND due_date <= $2
               ORDER BY due_date ASC
           `, [queryScopeId, new Date(now.getFullYear(), now.getMonth() + 1, 1)]),
@@ -167,10 +167,10 @@ export function createProactiveHandler(adapters: { db: ScopeDatabase; verifySess
 
           // Upcoming Obligations Summary (Next 30 days)
           scopedQuery(`
-              SELECT SUM(amount) as total, COUNT(*) as count
+              SELECT SUM(amount - COALESCE(paid_amount, 0)) as total, COUNT(*) as count
               FROM public.payables 
               WHERE ${queryFilter} 
-              AND status='open' 
+              AND status IN ('open', 'partial')
               AND due_date > CURRENT_DATE AND due_date <= (CURRENT_DATE + INTERVAL '30 days')
           `, [queryScopeId]),
 
@@ -185,20 +185,20 @@ export function createProactiveHandler(adapters: { db: ScopeDatabase; verifySess
 
           // Future Projection - Payables (Next 30 to 90 days)
           scopedQuery(`
-              SELECT due_date, amount, title
+              SELECT due_date, (amount - COALESCE(paid_amount, 0)) as amount, title
               FROM public.payables
               WHERE ${queryFilter}
-              AND status = 'open'
+              AND status IN ('open', 'partial')
               AND due_date > CURRENT_DATE AND due_date <= CURRENT_DATE + ($2 || ' days')::INTERVAL
               ORDER BY due_date ASC
           `, [queryScopeId, daysToProject]),
 
           // Future Projection - Receivables (Next 30 to 90 days)
           scopedQuery(`
-              SELECT due_date, amount, title
+              SELECT due_date, (amount - COALESCE(received_amount, 0)) as amount, title
               FROM public.receivables
               WHERE ${queryFilter}
-              AND status = 'open'
+              AND status IN ('open', 'partial')
               AND due_date > CURRENT_DATE AND due_date <= CURRENT_DATE + ($2 || ' days')::INTERVAL
               ORDER BY due_date ASC
           `, [queryScopeId, daysToProject]),

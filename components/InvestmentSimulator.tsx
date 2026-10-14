@@ -4,7 +4,12 @@ import { formatCurrency } from '../utils/formatters';
 import { TrendingUpIcon } from './icons';
 import { simulateInvestmentPurchase, getMarketData, MarketInfo } from '../services/marketDataService';
 import { useToast } from '../context/ToastContext';
-import { B3_FUNDAMENTAL_BENCHMARKS } from '../api/portfolio/market-data';
+import {
+    calculatePvp,
+    calculateBazinPrice,
+    calculateGrahamPrice,
+    calculateSafetyMargin,
+} from '../utils/investmentValuation';
 import { MonteCarloSimulator } from './MonteCarloSimulator';
 import { StressTestLab } from './StressTestLab';
 
@@ -81,13 +86,7 @@ export const InvestmentSimulator: React.FC = () => {
         return () => clearTimeout(timer);
     }, [ticker]);
 
-    // Benchmark fallback for current ticker
-    const benchmark = useMemo(() => {
-        const norm = ticker.trim().toUpperCase();
-        return B3_FUNDAMENTAL_BENCHMARKS[norm] || null;
-    }, [ticker]);
-
-    // Effective values (User Custom Input > Live API Quote > Benchmark Database)
+    // Effective values (User Custom Input > Live API Quote)
     const effectivePrice = useMemo(() => {
         if (customPrice !== '' && Number(customPrice) > 0) return Number(customPrice);
         if (activeQuote?.price && activeQuote.price > 0) return activeQuote.price;
@@ -97,26 +96,20 @@ export const InvestmentSimulator: React.FC = () => {
     const effectiveDividends = useMemo(() => {
         if (customDividends !== '' && Number(customDividends) >= 0) return Number(customDividends);
         if (activeQuote?.dividends12m && activeQuote.dividends12m > 0) return activeQuote.dividends12m;
-        if (benchmark?.dividends12m) return benchmark.dividends12m;
-        if (activeQuote?.dividendYield && effectivePrice > 0) {
-            return Math.round((activeQuote.dividendYield * effectivePrice / 100) * 100) / 100;
-        }
         return 0;
-    }, [customDividends, activeQuote, benchmark, effectivePrice]);
+    }, [customDividends, activeQuote]);
 
     const effectiveVpa = useMemo(() => {
         if (customVpa !== '' && Number(customVpa) > 0) return Number(customVpa);
         if (activeQuote?.vpa && activeQuote.vpa > 0) return activeQuote.vpa;
-        if (benchmark?.vpa) return benchmark.vpa;
         return 0;
-    }, [customVpa, activeQuote, benchmark]);
+    }, [customVpa, activeQuote]);
 
     const effectiveLpa = useMemo(() => {
         if (customLpa !== '' && Number(customLpa) > 0) return Number(customLpa);
         if (activeQuote?.lpa && activeQuote.lpa > 0) return activeQuote.lpa;
-        if (benchmark?.lpa) return benchmark.lpa;
         return 0;
-    }, [customLpa, activeQuote, benchmark]);
+    }, [customLpa, activeQuote]);
 
     const isCrypto = useMemo(() => {
         const t = ticker.trim().toUpperCase();
@@ -130,51 +123,38 @@ export const InvestmentSimulator: React.FC = () => {
 
     // ─── LIVE DYNAMIC VALUATION CALCULATIONS (NEVER STATIC) ───────────────────────────
     
-    // 1. P/VP Dinâmico = Preço / VPA
+    // 1. Dynamic P/VP = Price / VPA
     const livePvp = useMemo(() => {
-        if (effectivePrice > 0 && effectiveVpa > 0) {
-            return Math.round((effectivePrice / effectiveVpa) * 100) / 100;
-        }
-        return activeQuote?.pvp ?? null;
+        const calculated = calculatePvp(effectivePrice, effectiveVpa);
+        return calculated !== null ? calculated : (activeQuote?.pvp ?? null);
     }, [effectivePrice, effectiveVpa, activeQuote]);
 
-    // 2. Preço Teto Bazin = Proventos12M / (Taxa / 100)
+    // 2. Bazin Ceiling Price = Dividends12M / (Rate / 100)
     const liveBazinPrice = useMemo(() => {
-        if (effectiveDividends > 0 && bazinRate > 0) {
-            return Math.round((effectiveDividends / (bazinRate / 100)) * 100) / 100;
-        }
-        return activeQuote?.bazinPrice ?? null;
+        const calculated = calculateBazinPrice(effectiveDividends, bazinRate);
+        return calculated !== null ? calculated : (activeQuote?.bazinPrice ?? null);
     }, [effectiveDividends, bazinRate, activeQuote]);
 
     const liveBazinMargin = useMemo(() => {
-        if (liveBazinPrice !== null && effectivePrice > 0) {
-            return Math.round(((liveBazinPrice - effectivePrice) / effectivePrice) * 1000) / 10;
-        }
-        return null;
+        return calculateSafetyMargin(liveBazinPrice, effectivePrice);
     }, [liveBazinPrice, effectivePrice]);
 
-    // 3. Preço Justo de Graham
-    // Para Ações: V = sqrt(22.5 * LPA * VPA)
-    // Para FIIs: V = VPA (Valor Justo Contábil)
+    // 3. Graham Fair Price
+    // For Equities: V = sqrt(22.5 * LPA * VPA)
+    // For FIIs: V = VPA (Accounting Fair Value)
     const liveGrahamPrice = useMemo(() => {
         if (isFii) {
             return effectiveVpa > 0 ? effectiveVpa : (activeQuote?.grahamPrice ?? null);
         }
-        if (effectiveLpa > 0 && effectiveVpa > 0) {
-            const raw = Math.sqrt(22.5 * effectiveLpa * effectiveVpa);
-            return (!isNaN(raw) && isFinite(raw)) ? Math.round(raw * 100) / 100 : null;
-        }
-        return activeQuote?.grahamPrice ?? null;
+        const calculated = calculateGrahamPrice(effectiveLpa, effectiveVpa);
+        return calculated !== null ? calculated : (activeQuote?.grahamPrice ?? null);
     }, [isFii, effectiveLpa, effectiveVpa, activeQuote]);
 
     const liveGrahamMargin = useMemo(() => {
-        if (liveGrahamPrice !== null && effectivePrice > 0) {
-            return Math.round(((liveGrahamPrice - effectivePrice) / effectivePrice) * 1000) / 10;
-        }
-        return null;
+        return calculateSafetyMargin(liveGrahamPrice, effectivePrice);
     }, [liveGrahamPrice, effectivePrice]);
 
-    // 4. Preço Teto FII (Spread NTN-B 8.75% a.a.)
+    // 4. FII Ceiling Price (Spread NTN-B 8.75% a.a.)
     const liveFiiCeiling = useMemo(() => {
         if (effectiveDividends > 0) {
             return Math.round((effectiveDividends / 0.0875) * 100) / 100;
@@ -183,10 +163,7 @@ export const InvestmentSimulator: React.FC = () => {
     }, [effectiveDividends, activeQuote]);
 
     const liveFiiMargin = useMemo(() => {
-        if (liveFiiCeiling !== null && effectivePrice > 0) {
-            return Math.round(((liveFiiCeiling - effectivePrice) / effectivePrice) * 1000) / 10;
-        }
-        return null;
+        return calculateSafetyMargin(liveFiiCeiling, effectivePrice);
     }, [liveFiiCeiling, effectivePrice]);
 
     // 5. Dividend Yield Dinâmico

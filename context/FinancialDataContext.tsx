@@ -388,7 +388,7 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
                     const data = await response.json();
                     if (!isCurrent() || generation !== dataGenerationRef.current) throw new Error('Atualização substituída por outra visão ou carregamento.');
                     if (!Array.isArray(data.investments) || !Array.isArray(data.fixed_income_investments) || !Array.isArray(data.transactions) || !Array.isArray(data.financial_transactions) || !Array.isArray(data.accounts) || !Array.isArray(data.financial_snapshot?.accounts)) throw new Error('Snapshot financeiro incompleto; atualização pendente.');
-                    const mapTransaction = (row: any): Transaction => ({ id: row.id, date: row.date, accountId: row.account_id, toAccountId: row.to_account_id || undefined, transactionType: row.transaction_type, category: row.category, description: row.description || '', amount: Number(row.amount || 0), paymentMethod: row.payment_method || '', costCenterId: row.cost_center_id || undefined, isBusinessRevenue: !!row.is_business_revenue, isBusinessExpense: !!row.is_business_expense });
+                    const mapTransaction = (row: any): Transaction => ({ id: row.id, date: row.date, accountId: row.account_id, toAccountId: row.to_account_id || undefined, transactionType: row.transaction_type, category: row.category, description: row.description || '', amount: Number(row.amount || 0), paymentMethod: row.payment_method || '', costCenterId: row.cost_center_id || undefined, isBusinessRevenue: !!row.is_business_revenue, isBusinessExpense: !!row.is_business_expense, fitId: row.fit_id || undefined });
                     const txList = data.transactions.map(mapTransaction);
                     // Publish one authoritative load together; replay rows are historical, never restored.
                     setInvestments(data.investments.map((row: any) => ({ id: row.id, type: row.type, ticker: row.ticker || '', quantity: Number(row.quantity || 0), purchasePrice: Number(row.purchase_price || 0), purchaseDate: row.purchase_date || '' })));
@@ -513,12 +513,13 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
                             id: r.id, date: r.date, accountId: r.account_id, toAccountId: r.to_account_id || undefined, 
                             transactionType: r.transaction_type, category: r.category, description: r.description || '', 
                             amount: Number(r.amount || 0), paymentMethod: r.payment_method || '', costCenterId: r.cost_center_id || undefined,
-                            isBusinessRevenue: !!r.is_business_revenue, isBusinessExpense: !!r.is_business_expense
+                            isBusinessRevenue: !!r.is_business_revenue, isBusinessExpense: !!r.is_business_expense,
+                            fitId: r.fit_id || undefined
                         }));
                         setTransactions(txList);
                         setFinancialBaseline(txList);
                         if (Array.isArray(j.financial_transactions)) {
-                            setFinancialTransactions(j.financial_transactions.map((row: any) => ({ id: row.id, date: row.date, accountId: row.account_id, toAccountId: row.to_account_id || undefined, transactionType: row.transaction_type, category: row.category, description: row.description || '', amount: Number(row.amount || 0), paymentMethod: row.payment_method || '', costCenterId: row.cost_center_id || undefined, isBusinessRevenue: !!row.is_business_revenue, isBusinessExpense: !!row.is_business_expense })));
+                            setFinancialTransactions(j.financial_transactions.map((row: any) => ({ id: row.id, date: row.date, accountId: row.account_id, toAccountId: row.to_account_id || undefined, transactionType: row.transaction_type, category: row.category, description: row.description || '', amount: Number(row.amount || 0), paymentMethod: row.payment_method || '', costCenterId: row.cost_center_id || undefined, isBusinessRevenue: !!row.is_business_revenue, isBusinessExpense: !!row.is_business_expense, fitId: row.fit_id || undefined })));
                         } else {
                             setFinancialTransactions(txList);
                         }
@@ -583,7 +584,8 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
                         paymentMethod: r.payment_method || '',
                         costCenterId: r.cost_center_id || undefined,
                         isBusinessRevenue: !!r.is_business_revenue,
-                        isBusinessExpense: !!r.is_business_expense
+                        isBusinessExpense: !!r.is_business_expense,
+                        fitId: r.fit_id || undefined
                     }));
                     setTransactions(txList);
                     setHasMoreTransactions(txList.length === 500);
@@ -763,7 +765,7 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
                 const j = await r.json();
                 const rows: any[] = (j.rows || []);
                 if (!rows.length) { setHasMoreTransactions(false); return; }
-                const appended = rows.map((r: any) => ({ id: r.id, date: r.date, accountId: r.account_id, toAccountId: r.to_account_id || undefined, transactionType: r.transaction_type, category: r.category, description: r.description || '', amount: Number(r.amount || 0), paymentMethod: r.payment_method || '', costCenterId: r.cost_center_id || undefined, isBusinessRevenue: !!r.is_business_revenue, isBusinessExpense: !!r.is_business_expense }));
+                const appended = rows.map((r: any) => ({ id: r.id, date: r.date, accountId: r.account_id, toAccountId: r.to_account_id || undefined, transactionType: r.transaction_type, category: r.category, description: r.description || '', amount: Number(r.amount || 0), paymentMethod: r.payment_method || '', costCenterId: r.cost_center_id || undefined, isBusinessRevenue: !!r.is_business_revenue, isBusinessExpense: !!r.is_business_expense, fitId: r.fit_id || undefined }));
                 setTransactions(prev => {
                     const existing = new Set(prev.map(transaction => transaction.id));
                     return [...prev, ...appended.filter(transaction => !existing.has(transaction.id))];
@@ -801,7 +803,7 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
                 const j = await r.json();
                 const rows: any[] = (j.rows || []);
                 if (!rows.length) { setHasMoreTransactions(false); return; }
-                const appended = rows.map((r: any) => ({ id: r.id, date: r.date, accountId: r.account_id, toAccountId: r.to_account_id || undefined, transactionType: r.transaction_type, category: r.category, description: r.description || '', amount: Number(r.amount || 0), paymentMethod: r.payment_method || '', costCenterId: r.cost_center_id || undefined, isBusinessRevenue: !!r.is_business_revenue, isBusinessExpense: !!r.is_business_expense }));
+                const appended = rows.map((r: any) => ({ id: r.id, date: r.date, accountId: r.account_id, toAccountId: r.to_account_id || undefined, transactionType: r.transaction_type, category: r.category, description: r.description || '', amount: Number(r.amount || 0), paymentMethod: r.payment_method || '', costCenterId: r.cost_center_id || undefined, isBusinessRevenue: !!r.is_business_revenue, isBusinessExpense: !!r.is_business_expense, fitId: r.fit_id || undefined }));
                 setTransactions(prev => [...prev, ...appended].sort((a,b)=> new Date(b.date).getTime() - new Date(a.date).getTime()));
                 setHasMoreTransactions(rows.length === PAGE);
             } catch {}
@@ -963,7 +965,7 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
 
     const addTransaction = async (transaction: Omit<Transaction, 'id'>) => {
         if (dbProvider === 'neon' && user) {
-            const j = await callApi('transactions_insert', { date: transaction.date, accountId: transaction.accountId, toAccountId: transaction.toAccountId ?? null, transactionType: transaction.transactionType, category: transaction.category, description: transaction.description ?? null, amount: transaction.amount, paymentMethod: transaction.paymentMethod ?? null, costCenterId: transaction.costCenterId ?? null, isBusinessRevenue: transaction.isBusinessRevenue ?? false, isBusinessExpense: transaction.isBusinessExpense ?? false });
+            const j = await callApi('transactions_insert', { date: transaction.date, accountId: transaction.accountId, toAccountId: transaction.toAccountId ?? null, transactionType: transaction.transactionType, category: transaction.category, description: transaction.description ?? null, amount: transaction.amount, paymentMethod: transaction.paymentMethod ?? null, costCenterId: transaction.costCenterId ?? null, isBusinessRevenue: transaction.isBusinessRevenue ?? false, isBusinessExpense: transaction.isBusinessExpense ?? false, fitId: transaction.fitId ?? null });
             
             if (j.error) {
                 showToast('Lançamento não foi salvo. Corrija o erro antes de tentar novamente.', 'error');
@@ -975,7 +977,11 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
                 showToast('Lançamento adicionado no dispositivo.', 'info');
                 return;
             }
-            const newTx = { id: rrow.id, date: rrow.date, accountId: rrow.account_id, toAccountId: rrow.to_account_id || undefined, transactionType: rrow.transaction_type, category: rrow.category, description: rrow.description || '', amount: Number(rrow.amount || 0), paymentMethod: rrow.payment_method || '', costCenterId: rrow.cost_center_id || undefined, isBusinessRevenue: !!rrow.is_business_revenue, isBusinessExpense: !!rrow.is_business_expense };
+            if (j.duplicate) {
+                showToast('Transação com este identificador já existe no sistema.', 'info');
+                return;
+            }
+            const newTx = { id: rrow.id, date: rrow.date, accountId: rrow.account_id, toAccountId: rrow.to_account_id || undefined, transactionType: rrow.transaction_type, category: rrow.category, description: rrow.description || '', amount: Number(rrow.amount || 0), paymentMethod: rrow.payment_method || '', costCenterId: rrow.cost_center_id || undefined, isBusinessRevenue: !!rrow.is_business_revenue, isBusinessExpense: !!rrow.is_business_expense, fitId: rrow.fit_id || undefined };
             setTransactions(prev => [newTx, ...prev].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
         } else {
             setTransactions(prev => [...prev, { ...transaction, id: new Date().toISOString() }].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
@@ -1034,10 +1040,16 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
                         paymentMethod: transaction.paymentMethod ?? null,
                         costCenterId: transaction.costCenterId ?? null,
                         isBusinessRevenue: transaction.isBusinessRevenue ?? false,
-                        isBusinessExpense: transaction.isBusinessExpense ?? false
+                        isBusinessExpense: transaction.isBusinessExpense ?? false,
+                        fitId: transaction.fitId ?? null
                     });
                     if (!j?.error && j?.rows?.[0]) {
                         const rrow = j.rows[0];
+                        if (j.duplicate) {
+                            // Already in DB; accounted for idempotent skip without repeating local state
+                            insertedCount++;
+                            continue;
+                        }
                         newLocalTxs.push({
                             id: rrow.id,
                             date: rrow.date,
@@ -1050,7 +1062,8 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
                             paymentMethod: rrow.payment_method || '',
                             costCenterId: rrow.cost_center_id || undefined,
                             isBusinessRevenue: !!rrow.is_business_revenue,
-                            isBusinessExpense: !!rrow.is_business_expense
+                            isBusinessExpense: !!rrow.is_business_expense,
+                            fitId: rrow.fit_id || undefined
                         });
                         insertedCount++;
                         continue;

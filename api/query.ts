@@ -414,7 +414,7 @@ export default async function handler(req: any, res: any) {
         res.statusCode = 200; res.setHeader('content-type','application/json');
         res.end(JSON.stringify(page)); return;
     } else if (type === 'transactions_insert') {
-        let { date, accountId, toAccountId, transactionType, category, description, amount, paymentMethod, costCenterId, isBusinessRevenue, isBusinessExpense } = data;
+        let { date, accountId, toAccountId, transactionType, category, description, amount, paymentMethod, costCenterId, isBusinessRevenue, isBusinessExpense, fitId } = data;
         const isIncome = transactionType === 'Entrada' || transactionType === 'income' || transactionType === 'receita';
         const isExpense = transactionType === 'Saída' || transactionType === 'expense' || transactionType === 'despesa';
         const businessRevenue = isIncome && !!isBusinessRevenue;
@@ -433,6 +433,22 @@ export default async function handler(req: any, res: any) {
             }
         }
 
+        const cleanFitId = typeof fitId === 'string' && fitId.trim() ? fitId.trim() : null;
+        if (cleanFitId) {
+            const existing = await db.query(
+                orgId
+                    ? 'select * from public.transactions where org_id=$1 and account_id=$2 and fit_id=$3 limit 1'
+                    : 'select * from public.transactions where user_id=$1 and org_id is null and account_id=$2 and fit_id=$3 limit 1',
+                orgId ? [orgId, accountId, cleanFitId] : [userId, accountId, cleanFitId]
+            );
+            if (existing.rows && existing.rows.length > 0) {
+                res.statusCode = 200;
+                res.setHeader('content-type', 'application/json');
+                res.end(JSON.stringify({ rows: existing.rows, duplicate: true }));
+                return;
+            }
+        }
+
         if (!category || typeof category !== 'string' || category.trim() === '') {
             category = 'Geral';
         }
@@ -446,7 +462,7 @@ export default async function handler(req: any, res: any) {
         const id = crypto.randomUUID();
         await enforceTxQuota(id, date);
         const targetOrgId = orgId || null;
-        r = await db.query('insert into public.transactions(id,user_id,date,account_id,to_account_id,transaction_type,category,description,amount,payment_method,cost_center_id,is_business_revenue,is_business_expense,org_id) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning *', [id, userId, date, accountId, toAccountId || null, transactionType, category, description, amount, paymentMethod, costCenterId || null, businessRevenue, businessExpense, targetOrgId]);
+        r = await db.query('insert into public.transactions(id,user_id,date,account_id,to_account_id,transaction_type,category,description,amount,payment_method,cost_center_id,is_business_revenue,is_business_expense,org_id,fit_id) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) returning *', [id, userId, date, accountId, toAccountId || null, transactionType, category, description, amount, paymentMethod, costCenterId || null, businessRevenue, businessExpense, targetOrgId, cleanFitId]);
 
         // Pro-labore Integration logic for Pro Tier
         if (targetOrgId && String(tier || '').toLowerCase() === 'pro' && transactionType === 'expense') {

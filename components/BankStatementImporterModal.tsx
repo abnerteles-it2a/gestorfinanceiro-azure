@@ -182,7 +182,8 @@ export const BankStatementImporterModal: React.FC<BankStatementImporterModalProp
                 paymentMethod: item.paymentMethod || 'Outro',
                 costCenterId: undefined,
                 isBusinessRevenue: false,
-                isBusinessExpense: false
+                isBusinessExpense: false,
+                fitId: item.fitId
             }));
 
             if (addTransactionsBatch) {

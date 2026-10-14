@@ -77,6 +77,8 @@ const sqls: string[] = [
   'alter table public.transactions add column if not exists is_business_revenue boolean not null default false',
   'alter table public.transactions add column if not exists is_business_expense boolean not null default false',
   'alter table public.transactions add column if not exists org_id uuid',
+  'alter table public.transactions add column if not exists fit_id text',
+  'create index if not exists idx_transactions_acc_fitid on public.transactions(account_id, fit_id) where fit_id is not null',
   'alter table public.categories add column if not exists mei_category text',
   'alter table public.categories add column if not exists org_id uuid',
   'alter table public.profiles add column if not exists preferences jsonb default \'{}\'',

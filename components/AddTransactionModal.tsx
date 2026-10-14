@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useFinancialData } from '../context/FinancialDataContext';
 import { useAuth } from '../context/AuthContext';
 import { calcDataParcelas } from '../utils/financial';
+import { getCreditCardCycle, createCreditCardInstallments } from '../utils/creditCard';
 import { TransactionType } from '../types';
 import type { Transaction } from '../types';
 import { Modal } from './shared/Modal';
@@ -79,6 +80,10 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
     const [isRecurring, setIsRecurring] = useState(false);
     const [recurrenceFrequency, setRecurrenceFrequency] = useState<'monthly' | 'weekly'>('monthly');
     const [recurrenceCount, setRecurrenceCount] = useState<number>(1);
+
+    // Credit Card Cycle State
+    const [cardClosingDay, setCardClosingDay] = useState<number>(25);
+    const [cardDueDay, setCardDueDay] = useState<number>(5);
     
     const availableCategories = categories.filter(c => c.type === transactionType || transactionType === TransactionType.TRANSFER);
 
@@ -302,6 +307,54 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         const count = isRecurring ? recurrenceCount : 1;
         const nature = transactionData.transactionType;
         const baseDate = new Date(date + 'T12:00:00'); // Use noon to avoid TZ shift
+
+        // Handle Credit Card Installments / Invoices
+        const isCreditCard = paymentMethod === 'Cartão de Crédito' && nature === TransactionType.EXPENSE;
+        if (isCreditCard) {
+            setLoading(true);
+            try {
+                const cardConfig = { id: accountId || 'card', closingDay: cardClosingDay, dueDay: cardDueDay };
+                const parsedAmt = parseCurrencyInput(amount);
+                const installments = createCreditCardInstallments({
+                    id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `cc_${Date.now()}`,
+                    cardId: cardConfig.id,
+                    purchasedOn: date,
+                    amount: parsedAmt,
+                    installmentCount: count,
+                    recognitionDate: date
+                }, cardConfig);
+
+                for (let i = 0; i < count; i++) {
+                    const inst = installments[i];
+                    const currentLabel = count > 1 ? `${description} (${i + 1}/${count})` : description;
+                    const isFuture = inst.dueOn > new Date().toISOString().slice(0, 10);
+
+                    if (isFuture) {
+                        const payload = {
+                            title: `Fatura Cartão: ${currentLabel}`,
+                            amount: inst.amount,
+                            dueDate: inst.dueOn,
+                            category: transactionData.category,
+                            costCenterId: transactionData.costCenterId,
+                            isRecurring: count > 1,
+                            notes: `Competência: Compra em ${date} (Fatura fecha em ${inst.closesOn})`
+                        };
+                        await fetch('/api/query', { method: 'POST', headers: await getAuthHeaders(), body: JSON.stringify({ type: 'payables_insert', data: payload }) });
+                    } else {
+                        const txPayload = { ...transactionData, amount: inst.amount, date: inst.dueOn, description: currentLabel };
+                        await addTransaction(txPayload);
+                    }
+                }
+                showToast(count > 1 ? `${count} parcelas de cartão programadas na fatura!` : 'Lançamento de cartão registrado na fatura!', 'success');
+                onClose();
+                return;
+            } catch (err: any) {
+                console.error('Credit card installment error:', err);
+                showToast(`Erro no cálculo da fatura do cartão: ${err.message}`, 'error');
+                setLoading(false);
+                return;
+            }
+        }
         
         setLoading(true);
         try {
@@ -617,6 +670,52 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                         </div>
                     ) : <div />}
                 </div>
+
+                {/* Credit Card Cycle Section */}
+                {paymentMethod === 'Cartão de Crédito' && transactionType === TransactionType.EXPENSE && (
+                    <div className="p-4 rounded-2xl bg-teal-50/70 dark:bg-teal-950/20 border border-teal-200/80 dark:border-teal-800/60 flex flex-col gap-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                            <span className="text-xs font-black text-teal-800 dark:text-teal-300 uppercase tracking-wider flex items-center gap-1.5">
+                                💳 Ciclo da Fatura do Cartão (Competência & Caixa)
+                            </span>
+                            {(() => {
+                                try {
+                                    const cycle = getCreditCardCycle(date, { id: accountId || 'card', closingDay: cardClosingDay, dueDay: cardDueDay });
+                                    return (
+                                        <span className="text-[11px] font-bold text-teal-700 dark:text-teal-400">
+                                            Fatura fecha: <strong>{cycle.closesOn}</strong> • Vence: <strong>{cycle.dueOn}</strong>
+                                        </span>
+                                    );
+                                } catch {
+                                    return null;
+                                }
+                            })()}
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <FormField label="Dia de Fechamento da Fatura">
+                                <Input
+                                    type="number"
+                                    min={1}
+                                    max={31}
+                                    value={cardClosingDay}
+                                    onChange={(e) => setCardClosingDay(Math.min(31, Math.max(1, parseInt(e.target.value) || 1)))}
+                                />
+                            </FormField>
+                            <FormField label="Dia de Vencimento da Fatura">
+                                <Input
+                                    type="number"
+                                    min={1}
+                                    max={31}
+                                    value={cardDueDay}
+                                    onChange={(e) => setCardDueDay(Math.min(31, Math.max(1, parseInt(e.target.value) || 1)))}
+                                />
+                            </FormField>
+                        </div>
+                        <p className="text-[10px] text-teal-600/90 dark:text-teal-400/80 font-medium">
+                            Conforme o regime de competência, a despesa é reconhecida na data da compra ({date}). O pagamento bancário futuro da fatura liquidará a obrigação sem duplicar a despesa.
+                        </p>
+                    </div>
+                )}
 
                 {/* Recurrence Section */}
                 {transactionType !== TransactionType.TRANSFER && (

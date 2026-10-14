@@ -384,10 +384,15 @@ export function flagDuplicates(
     let duplicateCount = 0;
 
     const updated = items.map(item => {
-        // Find existing transaction matching date, account, and amount (within 0.02 tolerance)
+        // Find existing transaction matching FITID or date, account, and amount (within 0.02 tolerance)
         const match = existingTransactions.find(existing => {
             const sameAccount = !targetAccountId || targetAccountId === 'all' || existing.accountId === targetAccountId;
             if (!sameAccount) return false;
+
+            // If FITID is available on both, matching FITID is an exact duplicate
+            if (item.fitId && existing.fitId && item.fitId.trim() === existing.fitId.trim()) {
+                return true;
+            }
 
             const existingDate = existing.date.split('T')[0];
             const sameDate = existingDate === item.date;
@@ -399,10 +404,13 @@ export function flagDuplicates(
 
         if (match) {
             duplicateCount++;
+            const isFitMatch = !!(item.fitId && match.fitId && item.fitId.trim() === match.fitId.trim());
             return {
                 ...item,
                 isDuplicate: true,
-                duplicateReason: `Duplicata detectada: Já existe "${match.description}" de R$ ${match.amount.toFixed(2)} em ${item.date}`,
+                duplicateReason: isFitMatch
+                    ? `Duplicata detectada por FITID (${item.fitId}): "${match.description}" já importado em ${item.date}`
+                    : `Duplicata detectada: Já existe "${match.description}" de R$ ${match.amount.toFixed(2)} em ${item.date}`,
                 selected: false // Default to unselected so user is protected from double entry
             };
         }

@@ -142,4 +142,41 @@ DATA:OFXSGML
         assert.strictEqual(result.items[1].isDuplicate, false);
         assert.strictEqual(result.items[1].selected, true);
     });
+
+    test('flagDuplicates detects exact match by fitId regardless of slight description differences', () => {
+        const existing: Transaction[] = [
+            {
+                id: 'tx_with_fitid',
+                date: '2026-09-08T00:00:00.000Z',
+                accountId: 'acc_1',
+                transactionType: TransactionType.EXPENSE,
+                category: 'Outros',
+                description: 'Posto de Gasolina Shell',
+                amount: 150.00,
+                paymentMethod: 'Débito',
+                fitId: 'OFX-FITID-998877'
+            }
+        ];
+
+        const candidates = [
+            {
+                id: 'cand_fit',
+                fitId: 'OFX-FITID-998877',
+                date: '2026-09-08',
+                amount: 150.00,
+                transactionType: TransactionType.EXPENSE,
+                category: 'Transporte',
+                description: 'AUTO POSTO SHELL SA',
+                paymentMethod: 'Débito',
+                isDuplicate: false,
+                selected: true
+            }
+        ];
+
+        const result = flagDuplicates(candidates, existing, 'acc_1');
+        assert.strictEqual(result.duplicateCount, 1);
+        assert.strictEqual(result.items[0].isDuplicate, true);
+        assert.strictEqual(result.items[0].selected, false);
+        assert.match(result.items[0].duplicateReason || '', /FITID/);
+    });
 });

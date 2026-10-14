@@ -32,6 +32,22 @@ test('authorized urgent bill emits executable action.type contract with billId, 
 });
 
 function response() { return { statusCode: 0, body: null as any, setHeader() {}, end(text: string) { this.body = JSON.parse(text); } }; }
+
+test('proactive obligations query deducts paid_amount and includes partial settlements', async () => {
+  const reads: string[] = [];
+  const db = { query: async (sql: string) => {
+    reads.push(sql);
+    return { rows: [] };
+  }};
+  const handler = createProactiveHandler({ db, verifySession: async () => ({ userId: 'user-1' }), askAzureOpenAI: async () => '' });
+  const res = response();
+  await handler({ method: 'POST', headers: {}, body: {} } as any, res as any);
+  assert.equal(res.statusCode, 200);
+  const payableReads = reads.filter(sql => /FROM public\.payables/i.test(sql));
+  assert.ok(payableReads.length >= 3);
+  assert.ok(payableReads.every(sql => /COALESCE\(paid_amount,\s*0\)/i.test(sql) && /status\s+IN\s+\('open',\s*'partial'\)/i.test(sql)));
+});
+
 test('proactive handler denies forged organization without fetching balances or contacting Azure', async () => {
   let financialReads = 0;
   let modelCalls = 0;

@@ -1,6 +1,6 @@
 
 import { formatCurrency } from '../utils/formatters';
-import { B3_FUNDAMENTAL_BENCHMARKS } from '../api/portfolio/market-data';
+import { B3_FUNDAMENTAL_BENCHMARKS } from '../utils/b3Benchmarks';
 
 // Market data fetchers using public APIs
 
