@@ -10,6 +10,7 @@ import {
     calculateGrahamPrice,
     calculateSafetyMargin,
 } from '../utils/investmentValuation';
+import { B3_FUNDAMENTAL_BENCHMARKS } from '../utils/b3Benchmarks';
 import { MonteCarloSimulator } from './MonteCarloSimulator';
 import { StressTestLab } from './StressTestLab';
 
@@ -86,7 +87,13 @@ export const InvestmentSimulator: React.FC = () => {
         return () => clearTimeout(timer);
     }, [ticker]);
 
-    // Effective values (User Custom Input > Live API Quote)
+    // Benchmark reference fundamentals for current ticker
+    const benchmark = useMemo(() => {
+        const norm = ticker.trim().toUpperCase();
+        return B3_FUNDAMENTAL_BENCHMARKS[norm] || null;
+    }, [ticker]);
+
+    // Effective values (User Custom Input > Live API Quote > Benchmark)
     const effectivePrice = useMemo(() => {
         if (customPrice !== '' && Number(customPrice) > 0) return Number(customPrice);
         if (activeQuote?.price && activeQuote.price > 0) return activeQuote.price;
@@ -96,20 +103,23 @@ export const InvestmentSimulator: React.FC = () => {
     const effectiveDividends = useMemo(() => {
         if (customDividends !== '' && Number(customDividends) >= 0) return Number(customDividends);
         if (activeQuote?.dividends12m && activeQuote.dividends12m > 0) return activeQuote.dividends12m;
+        if (benchmark?.dividends12m !== undefined && benchmark.dividends12m >= 0) return benchmark.dividends12m;
         return 0;
-    }, [customDividends, activeQuote]);
+    }, [customDividends, activeQuote, benchmark]);
 
     const effectiveVpa = useMemo(() => {
         if (customVpa !== '' && Number(customVpa) > 0) return Number(customVpa);
         if (activeQuote?.vpa && activeQuote.vpa > 0) return activeQuote.vpa;
+        if (benchmark?.vpa && benchmark.vpa > 0) return benchmark.vpa;
         return 0;
-    }, [customVpa, activeQuote]);
+    }, [customVpa, activeQuote, benchmark]);
 
     const effectiveLpa = useMemo(() => {
         if (customLpa !== '' && Number(customLpa) > 0) return Number(customLpa);
         if (activeQuote?.lpa && activeQuote.lpa > 0) return activeQuote.lpa;
+        if (benchmark?.lpa && benchmark.lpa > 0) return benchmark.lpa;
         return 0;
-    }, [customLpa, activeQuote]);
+    }, [customLpa, activeQuote, benchmark]);
 
     const isCrypto = useMemo(() => {
         const t = ticker.trim().toUpperCase();

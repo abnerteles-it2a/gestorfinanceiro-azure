@@ -110,7 +110,10 @@ function observedNumber(...values: unknown[]): number | null {
   for (const value of values) {
     if (value === null || value === undefined) continue;
     if (typeof value === 'number' && Number.isFinite(value)) return value;
-    return null;
+    if (typeof value === 'string' && value.trim() !== '') {
+      const parsed = Number(value.replace(',', '.'));
+      if (Number.isFinite(parsed)) return parsed;
+    }
   }
   return null;
 }
@@ -544,7 +547,15 @@ export default async function handler(req: any, res: any) {
       } catch {}
 
       if (quote && quote.price > 0) {
-        const val = calculateSpecializedValuation(ticker, quote.price, aClass, brapiData, quote.high52w);
+        const benchmark = B3_FUNDAMENTAL_BENCHMARKS[ticker];
+        const enrichedData = {
+          ...brapiData,
+          vpa: observedNumber(brapiData.bookValuePerShare, brapiData.vpa, brapiData.defaultKeyStatistics?.bookValue, benchmark?.vpa),
+          lpa: observedNumber(brapiData.earningsPerShare, brapiData.lpa, brapiData.defaultKeyStatistics?.trailingEps, benchmark?.lpa),
+          dividends12m: observedDividends(brapiData, new Date()) ?? (benchmark?.dividends12m !== undefined ? benchmark.dividends12m : null),
+          dividendsData: brapiData.dividendsData
+        };
+        const val = calculateSpecializedValuation(ticker, quote.price, aClass, enrichedData, quote.high52w);
         const item: MarketItem = {
           ticker,
           price: quote.price,
