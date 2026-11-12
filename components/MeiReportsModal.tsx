@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { Modal } from './shared/Modal';
 import { useFinancialData } from '../context/FinancialDataContext';
-import { TransactionType } from '../types';
+import { getObligationDueDate, getObligationStatus } from '../utils/meiObligationRules';
+import { buildMeiScheduleRequest, type MeiScheduleObligation } from '../utils/meiScheduling';
 import { formatCurrency } from '../utils/formatters';
 import { calculateMeiFiscal } from '../utils/meiFiscalCalculator';
 import { DownloadIcon, ArrowTopRightOnSquareIcon } from './icons';
@@ -12,16 +13,20 @@ interface MeiReportsModalProps {
 }
 
 export const MeiReportsModal: React.FC<MeiReportsModalProps> = ({ isOpen, onClose }) => {
-    const { transactions, categories, addTransaction, accounts, meiOpeningDate, viewMode } = useFinancialData();
+    const { financialTransactions, categories, refreshData, accounts, meiOpeningDate, viewMode } = useFinancialData();
     const [activeTab, setActiveTab] = useState<'dasn' | 'irpf' | 'das' | 'dre'>('das');
     const currentYear = new Date().getFullYear();
     const [year, setYear] = useState(currentYear);
-    const [obligations, setObligations] = useState<any[]>([]);
+    const [obligations, setObligations] = useState<(MeiScheduleObligation & { obligation_type: string })[]>([]);
     const [obligationsLoading, setObligationsLoading] = useState(false);
     const [obligationsError, setObligationsError] = useState(false);
 
+    const [obligationsRevision, setObligationsRevision] = useState(0);
+    const [mutationPending, setMutationPending] = useState(false);
+
     React.useEffect(() => {
         if (!isOpen) return;
+        let active = true;
         setObligationsLoading(true);
         setObligationsError(false);
         const token = window.localStorage.getItem('gestor_financeiro_app_token');
@@ -33,14 +38,15 @@ export const MeiReportsModal: React.FC<MeiReportsModalProps> = ({ isOpen, onClos
                 if (!response.ok) throw new Error('mei_obligations_unavailable');
                 return response.json();
             })
-            .then(data => setObligations(Array.isArray(data.rows) ? data.rows : []))
-            .catch(() => { setObligations([]); setObligationsError(true); })
-            .finally(() => setObligationsLoading(false));
-    }, [isOpen, viewMode]);
+            .then(data => { if (active) setObligations(Array.isArray(data.rows) ? data.rows : []); })
+            .catch(() => { if (active) { setObligations([]); setObligationsError(true); } })
+            .finally(() => { if (active) setObligationsLoading(false); });
+        return () => { active = false; };
+    }, [isOpen, viewMode, obligationsRevision]);
 
     const fiscal = useMemo(
-        () => calculateMeiFiscal({ transactions, categories, year, openingDate: meiOpeningDate }),
-        [transactions, categories, year, meiOpeningDate],
+        () => calculateMeiFiscal({ transactions: financialTransactions, categories, year, openingDate: meiOpeningDate }),
+        [financialTransactions, categories, year, meiOpeningDate],
     );
     const limitStatus = {
         limit: fiscal.effectiveAnnualLimit,
@@ -53,16 +59,17 @@ export const MeiReportsModal: React.FC<MeiReportsModalProps> = ({ isOpen, onClos
     // DAS Management Logic: persisted obligations are authoritative; missing months remain unconfigured.
     const dasStatus = useMemo(() => Array.from({ length: 12 }, (_, i) => {
         const obligation = obligations.find(item => Number(item.reference_year) === year && Number(item.reference_month) === i + 1 && item.obligation_type === 'das_mei');
-        const dueDate = obligation?.due_date ? new Date(`${obligation.due_date}T12:00:00`) : null;
-        const today = new Date();
-        const status = obligation?.status || 'not_configured';
-        const computedStatus = status === 'paid' ? 'Pago' : status === 'cancelled' ? 'Cancelado' : status === 'scheduled' ? 'Agendado' : (dueDate && dueDate < today ? 'Atrasado' : status === 'pending' ? 'A Vencer' : 'Não configurado');
-        return { month: i, dueDate: dueDate || new Date(year, i + 1, 20), isPaid: status === 'paid', amount: Number(obligation?.total_amount || 0), status: computedStatus, obligation };
+        const dueDate = new Date(`${obligation?.due_date || getObligationDueDate(year, i + 1)}T12:00:00`);
+        const status = obligation ? getObligationStatus({ status: obligation.status, dueDate: obligation.due_date || getObligationDueDate(year, i + 1) }) : 'not_configured';
+        const labels = { paid: 'Pago', cancelled: 'Cancelado', scheduled: 'Agendado', overdue: 'Atrasado', pending: 'A Vencer', not_configured: 'Não configurado' };
+        return { month: i, dueDate, isPaid: status === 'paid', amount: Number(obligation?.total_amount || 0), status: labels[status], obligation };
     }), [obligations, year]);
 
     const handleQuickPay = async (month: number) => {
         const obligation = dasStatus.find(item => item.month === month)?.obligation;
+        if (mutationPending || obligationsLoading || obligationsError) return;
         if (!obligation) { alert('Cadastre a obrigação DAS desta competência antes de registrar o pagamento.'); return; }
+        if (obligation.status === 'paid' || obligation.status === 'cancelled' || !Number.isFinite(Number(obligation.total_amount)) || Number(obligation.total_amount) <= 0) { alert('Informe os valores da guia oficial em uma obrigação aberta antes de pagar.'); return; }
         if (!confirm(`Confirmar pagamento do DAS desta competência? Será lançado um débito de ${formatCurrency(Number(obligation.total_amount || 0))}.`)) return;
         
         const mainAccount = accounts[0];
@@ -71,20 +78,30 @@ export const MeiReportsModal: React.FC<MeiReportsModalProps> = ({ isOpen, onClos
             return;
         }
 
-        const paymentDate = new Date();
-        const token = window.localStorage.getItem('gestor_financeiro_app_token');
-        const headers: Record<string, string> = { 'content-type': 'application/json' };
-        if (token) headers.authorization = `Bearer ${token}`;
-        if (viewMode) headers['x-view-mode'] = viewMode;
-        const paymentResponse = await fetch('/api/query', { method: 'POST', headers, body: JSON.stringify({ type: 'mei_obligation_mark_paid', data: { id: obligation.id, accountId: mainAccount.id, paymentDate: paymentDate.toISOString().slice(0, 10), paymentMethod: 'Boleto' } }) });
-        if (!paymentResponse.ok) { alert('Não foi possível registrar o pagamento da obrigação.'); return; }
+        setMutationPending(true);
+        try {
+            const paymentDate = new Date();
+            const token = window.localStorage.getItem('gestor_financeiro_app_token');
+            const headers: Record<string, string> = { 'content-type': 'application/json' };
+            if (token) headers.authorization = `Bearer ${token}`;
+            if (viewMode) headers['x-view-mode'] = viewMode;
+            const paymentResponse = await fetch('/api/query', { method: 'POST', headers, body: JSON.stringify({ type: 'mei_obligation_mark_paid', data: { id: obligation.id, accountId: mainAccount.id, paymentDate: paymentDate.toISOString().slice(0, 10), paymentMethod: 'Boleto' } }) });
+            if (!paymentResponse.ok) throw new Error('mei_payment_failed');
+            refreshData();
+            setObligationsLoading(true);
+            setObligationsRevision(value => value + 1);
+        } catch {
+            alert('Não foi possível registrar o pagamento da obrigação.');
+        } finally {
+            setMutationPending(false);
+        }
     };
 
     const handleSchedulePay = async (month: number) => {
-        const date = new Date(year, month, 20);
-        const monthName = date.toLocaleString('pt-BR', { month: 'long' });
-        
+        if (mutationPending || obligationsLoading || obligationsError) return;
         try {
+            const request = buildMeiScheduleRequest(year, month, dasStatus.find(item => item.month === month)?.obligation);
+            setMutationPending(true);
             const token = window.localStorage.getItem('gestor_financeiro_app_token');
             const headers: Record<string, string> = { 'content-type': 'application/json' };
             if (token) headers['authorization'] = `Bearer ${token}`;
@@ -93,25 +110,17 @@ export const MeiReportsModal: React.FC<MeiReportsModalProps> = ({ isOpen, onClos
             const obligationResponse = await fetch('/api/query', {
                 method: 'POST',
                 headers,
-                body: JSON.stringify({
-                    type: 'mei_obligation_upsert',
-                    data: {
-                        referenceYear: year,
-                        referenceMonth: month + 1,
-                        dueDate: date.toISOString().slice(0, 10),
-                        principalAmount: Number(dasStatus.find(item => item.month === month)?.amount || 0),
-                        totalAmount: Number(dasStatus.find(item => item.month === month)?.amount || 0),
-                        status: 'scheduled',
-                        source: 'manual',
-                        rulesVersion: 'phase2-estimate-v1',
-                        notes: 'Agendado pelo Módulo MEI'
-                    }
-                })
+                body: JSON.stringify(request)
             });
             if (!obligationResponse.ok) throw new Error('obligation_schedule_failed');
-            alert('Agendado no Contas a Pagar com sucesso!');
+            refreshData();
+            setObligationsLoading(true);
+            setObligationsRevision(value => value + 1);
+            alert('Agendamento registrado na obrigação DAS. Isso não emite guia nem efetua pagamento.');
         } catch (e) {
-            alert('Erro ao agendar.');
+            alert(e instanceof Error && e.message !== 'obligation_schedule_failed' ? e.message : 'Erro ao agendar.');
+        } finally {
+            setMutationPending(false);
         }
     };
 
@@ -240,6 +249,7 @@ export const MeiReportsModal: React.FC<MeiReportsModalProps> = ({ isOpen, onClos
                                 <div>
                                     <p className="font-semibold">Guia DAS-MEI (Mensal)</p>
                                     <p className="opacity-80">Acesse o portal do governo para gerar o boleto e marque como pago aqui.</p>
+                                    <p className="opacity-80">Datas estimadas ajustam somente sábados e domingos. Feriados e prorrogações dependem do calendário oficial/PGMEI e do vencimento informado na obrigação, que será preservado. Este módulo não emite nem certifica guias.</p>
                                 </div>
                                 <div className="flex gap-2">
                                     <a 
@@ -272,7 +282,7 @@ export const MeiReportsModal: React.FC<MeiReportsModalProps> = ({ isOpen, onClos
                                                 <div className="text-lg font-bold text-gray-800 dark:text-white">{year}</div>
                                             </div>
                                             <div>
-                                                <div className="font-medium text-gray-900 dark:text-white">Vencimento: {item.dueDate.toLocaleDateString('pt-BR')}</div>
+                                                <div className="font-medium text-gray-900 dark:text-white">{item.obligation?.due_date ? 'Vencimento cadastrado' : 'Vencimento estimado'}: {item.dueDate.toLocaleDateString('pt-BR')}</div>
                                                 <div className={`text-sm ${item.isPaid ? 'text-green-600' : item.status === 'Atrasado' ? 'text-red-600' : 'text-gray-500'}`}>
                                                     Status: {item.status}
                                                 </div>
@@ -291,12 +301,14 @@ export const MeiReportsModal: React.FC<MeiReportsModalProps> = ({ isOpen, onClos
                                                 <div className="flex gap-2">
                                                     <button 
                                                         onClick={() => handleSchedulePay(item.month)}
+                                                        disabled={mutationPending || obligationsLoading || obligationsError || !item.obligation || item.obligation.status === 'cancelled' || item.amount <= 0}
                                                         className="px-3 py-1.5 bg-indigo-50 border border-indigo-200 dark:bg-indigo-900/30 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-sm transition-colors shadow-sm"
                                                     >
                                                         Agendar
                                                     </button>
                                                     <button 
                                                         onClick={() => handleQuickPay(item.month)}
+                                                        disabled={mutationPending || obligationsLoading || obligationsError || !item.obligation || item.obligation.status === 'cancelled' || item.amount <= 0}
                                                         className="px-3 py-1.5 bg-white border border-gray-300 dark:bg-gray-700 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-lg text-sm transition-colors shadow-sm"
                                                     >
                                                         Pagar Agora

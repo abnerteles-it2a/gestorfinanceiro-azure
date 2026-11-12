@@ -1,15 +1,14 @@
 import React, { useMemo } from 'react';
 import { useFinancialData } from '../context/FinancialDataContext';
-import { TransactionType } from '../types';
+import { getObligationStatus } from '../utils/meiObligationRules';
 import { formatCurrency } from '../utils/formatters';
 import { calculateMeiFiscal } from '../utils/meiFiscalCalculator';
 import { AlertTriangleIcon, CheckCircleIcon, ArrowTopRightOnSquareIcon, BankIcon, TrendingUpIcon, CalendarIcon } from './icons';
 
 export const MeiMonitoringWidget: React.FC = () => {
-    const { transactions, categories, isMei, meiOpeningDate, viewMode } = useFinancialData();
+    const { financialTransactions, categories, isMei, meiOpeningDate, viewMode } = useFinancialData();
     const [obligations, setObligations] = React.useState<any[]>([]);
     const currentYear = new Date().getFullYear();
-    const today = new Date();
     React.useEffect(() => {
         if (!isMei) return;
         const token = window.localStorage.getItem('gestor_financeiro_app_token');
@@ -22,21 +21,21 @@ export const MeiMonitoringWidget: React.FC = () => {
             .catch(() => setObligations([]));
     }, [isMei, viewMode]);
     const fiscal = useMemo(
-        () => calculateMeiFiscal({ transactions, categories, year: currentYear, openingDate: meiOpeningDate }),
-        [transactions, categories, currentYear, meiOpeningDate],
+        () => calculateMeiFiscal({ transactions: financialTransactions, categories, year: currentYear, openingDate: meiOpeningDate }),
+        [financialTransactions, categories, currentYear, meiOpeningDate],
     );
     const yearlyRevenue = fiscal.annualRevenue;
     const revenuePercentage = fiscal.limitUsagePercent;
     const remainingLimit = fiscal.remainingLimit;
 
     const overdueDas = useMemo(() => obligations
-        .filter(item => item.obligation_type === 'das_mei' && item.status === 'overdue')
+        .filter(item => item.obligation_type === 'das_mei' && getObligationStatus({ status: item.status, dueDate: item.due_date }) === 'overdue')
         .map(item => new Date(`${item.reference_year}-${String(item.reference_month).padStart(2, '0')}-01T12:00:00`).toLocaleDateString('pt-BR', { month: 'long' })), [obligations]);
 
     if (!isMei) return null;
 
     const isNearLimit = revenuePercentage > 80;
-    const pendingDas = obligations.filter(item => item.obligation_type === 'das_mei' && ['pending', 'scheduled'].includes(item.status));
+    const pendingDas = obligations.filter(item => item.obligation_type === 'das_mei' && ['pending', 'scheduled'].includes(getObligationStatus({ status: item.status, dueDate: item.due_date })));
     const hasOverdue = overdueDas.length > 0;
     const hasPendingDas = pendingDas.length > 0;
     const hasDasAlert = hasOverdue || hasPendingDas;
@@ -56,7 +55,7 @@ export const MeiMonitoringWidget: React.FC = () => {
                 </div>
                 <div className="flex items-center gap-2">
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-tighter ${hasDasAlert ? (hasOverdue ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700') : 'bg-emerald-100 text-emerald-600'}`}>
-                        {hasOverdue ? 'DAS Atrasado' : hasPendingDas ? 'DAS Pendente' : 'Regularizado'}
+                        {hasOverdue ? 'DAS Atrasado' : hasPendingDas ? 'DAS Pendente' : 'Sem pendências cadastradas'}
                     </span>
                 </div>
             </div>

@@ -2,14 +2,13 @@
 import React, { useState, useEffect } from 'react';
 import { useFinancialData } from '../context/FinancialDataContext';
 import { useAuth } from '../context/AuthContext';
-import { calcDataParcelas } from '../utils/financial';
-import { getCreditCardCycle, createCreditCardInstallments } from '../utils/creditCard';
+import { getCreditCardCycle } from '../utils/creditCard';
 import { TransactionType } from '../types';
 import type { Transaction } from '../types';
 import { Modal } from './shared/Modal';
 import { suggestCategoryAndType, parseTransactionFromText } from '../services/marketDataService';
 import { recordCategoryPreference, recordAccountPreference, recordPaymentPreference } from '../services/marketDataService';
-import { toIsoLocalDate, dateKey, formatInputMoney, formatCurrencyForInput, parseCurrencyInput } from '../utils/formatters';
+import { toIsoLocalDate, formatInputMoney, formatCurrencyForInput, parseCurrencyInput } from '../utils/formatters';
 import { SparklesIcon, PlusIcon } from './icons';
 import { DEFAULT_CATEGORY_EMOJIS } from './SettingsModal';
 import { useToast } from '../context/ToastContext';
@@ -17,6 +16,7 @@ import { FormField } from './ui/Forms/FormField';
 import { Input } from './ui/Forms/Input';
 import { Select } from './ui/Forms/Select';
 import { VoiceRecordButton } from './ui/VoiceRecordButton';
+import { createTransactionSubmission, hasPotentialTransactionDuplicate } from '../utils/transactionSubmission';
 
 interface AddTransactionModalProps {
     isOpen: boolean;
@@ -47,8 +47,8 @@ interface AddTransactionModalProps {
 const paymentMethodSuggestions = ['Boleto','PIX', 'Saldo Conta', 'Saldo Conta Investimentos', 'Saldo Corretora', 'Cartão de Débito', 'Cartão de Crédito', 'Dinheiro', 'Transferência Bancária', 'Débito Automático'];
 
 export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen, onClose, onAddAccount, aiInfo, initial }) => {
-    const { accounts, addTransaction, categories, transactions, costCenters, addCategory, addAccount, addCostCenter, isMei } = useFinancialData();
-    const { getToken } = useAuth();
+    const { accounts, addTransaction, categories, transactions, costCenters, addCategory, addAccount, addCostCenter, isMei, viewMode, organizationInfo, refreshData } = useFinancialData();
+    const { getToken, user } = useAuth();
     const { showToast } = useToast();
     const [transactionType, setTransactionType] = useState<TransactionType>(TransactionType.EXPENSE);
     const [accountId, setAccountId] = useState<string>('');
@@ -74,7 +74,19 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
     const [newAccountInitialBalance, setNewAccountInitialBalance] = useState('0');
     const [newCostCenterName, setNewCostCenterName] = useState('');
     const [isDupConfirmOpen, setIsDupConfirmOpen] = useState(false);
-    const [dupTx, setDupTx] = useState<Omit<Transaction, 'id'> | null>(null);
+    const pendingSubmission = React.useRef<ReturnType<typeof createTransactionSubmission> | null>(null);
+    const submitting = React.useRef(false);
+    const [loading, setLoading] = useState(false);
+    const [submissionLocked, setSubmissionLocked] = useState(false);
+    const [submissionMessage, setSubmissionMessage] = useState('');
+    const [retryBlocked, setRetryBlocked] = useState(false);
+    const scopeKey = JSON.stringify([user?.id, viewMode, organizationInfo?.id]);
+    const currentScope = React.useRef({ key: scopeKey, isOpen });
+    currentScope.current = { key: scopeKey, isOpen };
+    useEffect(() => {
+        currentScope.current.isOpen = isOpen;
+        return () => { currentScope.current.isOpen = false; };
+    }, [isOpen]);
     
     // Recurrence State
     const [isRecurring, setIsRecurring] = useState(false);
@@ -276,186 +288,111 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         }
     };
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        const transactionData: Omit<Transaction, 'id'> = {
-            accountId,
-            transactionType,
-            amount: parseCurrencyInput(amount),
-            description,
-            category,
-            paymentMethod: paymentMethod || 'Boleto',
-            date: toIsoLocalDate(date),
-            costCenterId,
-            isBusinessRevenue: transactionType === TransactionType.INCOME && isBusinessRevenue,
-            isBusinessExpense: transactionType === TransactionType.EXPENSE && isBusinessExpense,
-            ...(transactionType === TransactionType.TRANSFER && { toAccountId })
-        };
-        const normalized = (s: string) => (s || '').toLowerCase().replace(/\s+/g,' ').trim();
-        const sameDay = (a: string, b: string) => dateKey(a) === dateKey(b);
-        const isDup = transactions.some(t => {
-            const sameAcc = transactionData.transactionType === TransactionType.TRANSFER
-                ? (t.transactionType === TransactionType.TRANSFER && t.accountId === transactionData.accountId && t.toAccountId === transactionData.toAccountId)
-                : (t.accountId === transactionData.accountId && t.transactionType === transactionData.transactionType);
-            const amtClose = Math.abs(t.amount - transactionData.amount) < 0.01;
-            const descClose = normalized(t.description) === normalized(transactionData.description) || normalized(t.description).includes(normalized(transactionData.description)) || normalized(transactionData.description).includes(normalized(t.description));
-            return sameAcc && amtClose && sameDay(t.date, transactionData.date) && descClose;
-        });
-        if (isDup) { setDupTx(transactionData); setIsDupConfirmOpen(true); return; }
-        
-        // Handle Recurrence or Single Save
-        const count = isRecurring ? recurrenceCount : 1;
-        const nature = transactionData.transactionType;
-        const baseDate = new Date(date + 'T12:00:00'); // Use noon to avoid TZ shift
+    const clearSubmission = () => {
+        pendingSubmission.current = null;
+        setSubmissionLocked(false);
+        setSubmissionMessage('');
+        setRetryBlocked(false);
+        setIsDupConfirmOpen(false);
+    };
 
-        // Handle Credit Card Installments / Invoices
-        const isCreditCard = paymentMethod === 'Cartão de Crédito' && nature === TransactionType.EXPENSE;
-        if (isCreditCard) {
-            setLoading(true);
-            try {
-                const cardConfig = { id: accountId || 'card', closingDay: cardClosingDay, dueDay: cardDueDay };
-                const parsedAmt = parseCurrencyInput(amount);
-                const installments = createCreditCardInstallments({
-                    id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `cc_${Date.now()}`,
-                    cardId: cardConfig.id,
-                    purchasedOn: date,
-                    amount: parsedAmt,
-                    installmentCount: count,
-                    recognitionDate: date
-                }, cardConfig);
+    const handleClose = () => {
+        if (submitting.current) return;
+        if (submissionMessage && !window.confirm('O lote não é atômico. Itens confirmados não serão desfeitos. Fechar descarta os identificadores de retry; confira os registros antes de recadastrar. Deseja fechar?')) return;
+        clearSubmission();
+        onClose();
+    };
 
-                for (let i = 0; i < count; i++) {
-                    const inst = installments[i];
-                    const currentLabel = count > 1 ? `${description} (${i + 1}/${count})` : description;
-                    const isFuture = inst.dueOn > new Date().toISOString().slice(0, 10);
+    const cancelDuplicate = () => {
+        if (submitting.current) return;
+        clearSubmission();
+    };
 
-                    if (isFuture) {
-                        const payload = {
-                            title: `Fatura Cartão: ${currentLabel}`,
-                            amount: inst.amount,
-                            dueDate: inst.dueOn,
-                            category: transactionData.category,
-                            costCenterId: transactionData.costCenterId,
-                            isRecurring: count > 1,
-                            notes: `Competência: Compra em ${date} (Fatura fecha em ${inst.closesOn})`
-                        };
-                        await fetch('/api/query', { method: 'POST', headers: await getAuthHeaders(), body: JSON.stringify({ type: 'payables_insert', data: payload }) });
-                    } else {
-                        const txPayload = { ...transactionData, amount: inst.amount, date: inst.dueOn, description: currentLabel };
-                        await addTransaction(txPayload);
-                    }
-                }
-                showToast(count > 1 ? `${count} parcelas de cartão programadas na fatura!` : 'Lançamento de cartão registrado na fatura!', 'success');
-                onClose();
-                return;
-            } catch (err: any) {
-                console.error('Credit card installment error:', err);
-                showToast(`Erro no cálculo da fatura do cartão: ${err.message}`, 'error');
-                setLoading(false);
-                return;
-            }
-        }
-        
+    // Both normal submission and duplicate confirmation execute the SAME frozen plan.
+    const executeSubmission = async (confirmDuplicate = false) => {
+        if (submitting.current || !pendingSubmission.current) return;
+        submitting.current = true;
         setLoading(true);
         try {
-            for (let i = 0; i < count; i++) {
-                const currentIterationDate = new Date(baseDate);
-                if (recurrenceFrequency === 'monthly') {
-                    currentIterationDate.setTime(new Date(calcDataParcelas(count, baseDate)[i]).getTime());
-                } else {
-                    currentIterationDate.setDate(baseDate.getDate() + (i * 7));
-                }
-
-                const isoDate = currentIterationDate.toISOString().slice(0, 10);
-                const isFuture = isoDate > new Date().toISOString().slice(0, 10);
-                const currentLabel = count > 1 ? `${description} (${i + 1}/${count})` : description;
-
-                if (isFuture && nature !== TransactionType.TRANSFER) {
-                    // Save as Payable/Receivable
-                    const apiType = nature === TransactionType.EXPENSE ? 'payables_insert' : 'receivables_insert';
-                    const payload = {
-                        title: currentLabel,
-                        amount: transactionData.amount,
-                        dueDate: isoDate,
-                        category: transactionData.category,
-                        costCenterId: transactionData.costCenterId,
-                        isRecurring: true,
-                        notes: `Recorrência gerada em ${new Date().toLocaleDateString('pt-BR')}`
-                    };
-                    await fetch('/api/query', { method: 'POST', headers: await getAuthHeaders(), body: JSON.stringify({ type: apiType, data: payload }) });
-                } else {
-                    // Save as real Transaction
-                    const txPayload = { ...transactionData, date: isoDate, description: currentLabel };
-                    
-                    if (nature !== TransactionType.TRANSFER) {
-                        const exists = categories.some(c => c.name.toLowerCase() === txPayload.category.toLowerCase());
-                        if (!exists) {
-                            try { await addCategory({ name: txPayload.category, type: (txPayload.transactionType === TransactionType.INCOME ? 'Entrada' : 'Saída'), icon: '' }); } catch {}
-                        }
-                    }
-                    await addTransaction(txPayload);
-                    
-                    if (i === 0) {
-                        try { 
-                            recordCategoryPreference(description, category);
-                            recordAccountPreference(description, accountId);
-                            recordPaymentPreference(description, paymentMethod);
-                        } catch {}
-                    }
-                }
+            const result = await pendingSubmission.current.submit(confirmDuplicate);
+            if (result.status === 'duplicate_confirmation') {
+                setIsDupConfirmOpen(true);
+                return;
             }
-            
-            if (count > 1) {
-                showToast(`${count} lançamentos gerados com sucesso!`, "success");
+            setIsDupConfirmOpen(false);
+            if (result.status !== 'success') {
+                const message = `${result.confirmed}/${result.total} itens confirmados. ${result.message} O lote não é atômico; itens confirmados não serão repetidos neste modal.`;
+                setSubmissionMessage(message);
+                setRetryBlocked(result.retryBlocked);
+                showToast(message, 'error');
+                return;
             }
+            try {
+                recordCategoryPreference(description, category);
+                recordAccountPreference(description, accountId);
+                recordPaymentPreference(description, paymentMethod);
+            } catch {}
+            refreshData();
+            showToast(`${result.total} registro(s) confirmado(s). Compras no cartão ficam como obrigações, sem débito bancário.`, 'success');
+            clearSubmission();
+            setAmount('0,00');
+            setDescription('');
+            setPaymentMethod('');
+            setIsRecurring(false);
+            setRecurrenceCount(1);
+            onClose();
         } catch (error) {
-            console.error("Error saving recurrence:", error);
-            showToast("Erro ao processar recorrência.", "error");
+            const message = error instanceof Error ? error.message : 'Erro ao cadastrar lançamento.';
+            setSubmissionMessage(message);
+            showToast(message, 'error');
         } finally {
+            submitting.current = false;
             setLoading(false);
         }
-
-        onClose();
-        // Reset form
-        setAmount('0,00');
-        setDescription('');
-        setPaymentMethod('');
-        setIsRecurring(false);
-        setRecurrenceCount(1);
     };
 
-    // Helper for auth headers needed for direct API calls
-    const getAuthHeaders = async (): Promise<Record<string,string>> => {
-        const headers: Record<string,string> = { 'content-type': 'application/json' };
-        try {
-            const token = window.localStorage.getItem('gestor_financeiro_app_token') || '';
-            if (token) headers['authorization'] = `Bearer ${token}`;
-        } catch {}
-        return headers;
-    };
-
-    const [loading, setLoading] = useState(false);
-    const handleConfirmDup = async () => {
-        if (!dupTx) { setIsDupConfirmOpen(false); return; }
-        if (dupTx.transactionType !== TransactionType.TRANSFER) {
-            const exists = categories.some(c => c.name.toLowerCase() === dupTx.category.toLowerCase());
-            if (!exists) {
-                try { await addCategory({ name: dupTx.category, type: (dupTx.transactionType === TransactionType.INCOME ? 'Entrada' : 'Saída'), icon: '' }); } catch {}
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (submitting.current || retryBlocked || isDupConfirmOpen) return;
+        if (!pendingSubmission.current) {
+            const transactionData: Omit<Transaction, 'id'> = {
+                accountId, transactionType, amount: parseCurrencyInput(amount), description,
+                category, paymentMethod: paymentMethod || 'Boleto', date: toIsoLocalDate(date), costCenterId,
+                isBusinessRevenue: transactionType === TransactionType.INCOME && isBusinessRevenue,
+                isBusinessExpense: transactionType === TransactionType.EXPENSE && isBusinessExpense,
+                ...(transactionType === TransactionType.TRANSFER && { toAccountId })
+            };
+            try {
+                const now = new Date();
+                const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                pendingSubmission.current = createTransactionSubmission({
+                    transaction: transactionData, purchaseDate: date, today,
+                    count: isRecurring && transactionType !== TransactionType.TRANSFER ? recurrenceCount : 1,
+                    frequency: recurrenceFrequency, closingDay: cardClosingDay, dueDay: cardDueDay, viewMode,
+                }, {
+                    duplicate: hasPotentialTransactionDuplicate(transactionData, transactions),
+                    isCurrent: () => currentScope.current.isOpen && currentScope.current.key === scopeKey,
+                    getToken,
+                    addTransaction: async tx => {
+                        if (tx.transactionType !== TransactionType.TRANSFER && !categories.some(c => c.name.toLowerCase() === tx.category.toLowerCase())) {
+                            await addCategory({ name: tx.category, type: tx.transactionType === TransactionType.INCOME ? 'Entrada' : 'Saída', icon: '' });
+                        }
+                        if (!currentScope.current.isOpen || currentScope.current.key !== scopeKey) {
+                            throw new Error('Escopo alterado antes de registrar o movimento.');
+                        }
+                        await addTransaction(tx);
+                    },
+                });
+                setSubmissionLocked(true);
+            } catch (error) {
+                showToast(error instanceof Error ? error.message : 'Dados inválidos.', 'error');
+                return;
             }
         }
-        await addTransaction(dupTx);
-        try {
-            recordCategoryPreference(dupTx.description, dupTx.category);
-            recordAccountPreference(dupTx.description, dupTx.accountId);
-            recordPaymentPreference(dupTx.description, dupTx.paymentMethod || '');
-        } catch {}
-        setIsDupConfirmOpen(false);
-        onClose();
-        setAmount('0,00');
-        setDescription('');
-        setPaymentMethod('');
-        setDupTx(null);
+        await executeSubmission();
     };
+
+    const handleConfirmDup = () => executeSubmission(true);
 
     const footer = (
         <div className="flex flex-col sm:flex-row justify-between items-center gap-4 w-full">
@@ -466,10 +403,10 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                 </div>
             )}
             <div className="flex justify-end gap-3 ml-auto border-slate-100 dark:border-slate-800 pt-1">
-                <button type="button" onClick={onClose} className="px-6 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-colors">Cancelar</button>
-                <button type="submit" form="add-transaction-form" className="px-8 py-3 bg-[#0D9488] hover:bg-[#0F766E] text-white text-[11px] font-bold uppercase tracking-widest rounded-xl transition-all shadow-md shadow-[#0D9488]/25 dark:shadow-none disabled:opacity-50 flex items-center gap-2" disabled={accounts.length === 0 || loading}>
+                <button type="button" onClick={handleClose} disabled={loading} className="px-6 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-colors">Cancelar</button>
+                <button type="submit" form="add-transaction-form" className="px-8 py-3 bg-[#0D9488] hover:bg-[#0F766E] text-white text-[11px] font-bold uppercase tracking-widest rounded-xl transition-all shadow-md shadow-[#0D9488]/25 dark:shadow-none disabled:opacity-50 flex items-center gap-2" disabled={accounts.length === 0 || loading || retryBlocked || isDupConfirmOpen}>
                     {loading && <svg className="animate-spin h-3 w-3 text-white" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>}
-                    {isRecurring ? 'Lançar Recorrência' : 'Lançar'}
+                    {submissionMessage ? 'Retomar cadastro' : isRecurring ? 'Lançar Recorrência' : 'Lançar'}
                 </button>
             </div>
         </div>
@@ -477,14 +414,16 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
 
     return (
         <>
-        <Modal isOpen={isOpen} onClose={onClose} title="Novo Lançamento" size="lg" footer={footer}>
+        <Modal isOpen={isOpen} onClose={handleClose} title="Novo Lançamento" size="lg" footer={footer}>
             {aiInfo?.provider && aiInfo?.model && (
                 <div className="mb-2 text-right text-[11px] text-gray-500 dark:text-gray-400">
                     {aiInfo.provider === 'vertex_ai' ? 'Vertex AI' : aiInfo.provider} • {aiInfo.model}
                 </div>
             )}
             
-            <form id="add-transaction-form" onSubmit={handleSubmit} className="space-y-6 p-2">
+            {submissionMessage && <p role="alert" className="mb-3 text-sm text-amber-700 dark:text-amber-300">{submissionMessage} O retry não é preservado após recarregar a página.</p>}
+            <form id="add-transaction-form" onSubmit={handleSubmit} className="p-2">
+                <fieldset disabled={loading || submissionLocked} className="space-y-6 min-w-0">
                 
                 {/* Lançamento por Voz com IA */}
                 <div className="flex items-center justify-between bg-teal-500/5 dark:bg-teal-500/10 p-3 rounded-xl border border-teal-500/20">
@@ -712,7 +651,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                             </FormField>
                         </div>
                         <p className="text-[10px] text-teal-600/90 dark:text-teal-400/80 font-medium">
-                            Conforme o regime de competência, a despesa é reconhecida na data da compra ({date}). O pagamento bancário futuro da fatura liquidará a obrigação sem duplicar a despesa.
+                            A compra será cadastrada como obrigação com data de origem {date}, mesmo se já vencida. Nenhum débito bancário será lançado aqui; registre o pagamento separadamente. Não há conciliação automática de fatura neste cadastro.
                         </p>
                     </div>
                 )}
@@ -744,7 +683,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                         {isRecurring && (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in slide-in-from-top-1 duration-200">
                                 <FormField label="Frequência">
-                                    <Select value={recurrenceFrequency} onChange={(e) => setRecurrenceFrequency(e.target.value as any)}>
+                                    <Select value={paymentMethod === 'Cartão de Crédito' ? 'monthly' : recurrenceFrequency} disabled={paymentMethod === 'Cartão de Crédito'} onChange={(e) => setRecurrenceFrequency(e.target.value as any)}>
                                         <option value="monthly">Mensal (Fixo)</option>
                                         <option value="weekly">Semanal</option>
                                     </Select>
@@ -765,16 +704,16 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                         )}
                     </div>
                 )}
-                
+                </fieldset>
             </form>
         </Modal>
-        <Modal isOpen={isDupConfirmOpen} onClose={() => { setIsDupConfirmOpen(false); setDupTx(null); }} title="Possível duplicidade" size="sm">
+        <Modal isOpen={isDupConfirmOpen} onClose={cancelDuplicate} title="Possível duplicidade" size="sm">
             <div className="text-sm text-gray-800 dark:text-gray-100">
                 Possível duplicidade detectada para este lançamento. Deseja salvar mesmo assim?
             </div>
             <div className="mt-3 flex justify-end gap-2">
-                <button type="button" onClick={() => { setIsDupConfirmOpen(false); setDupTx(null); showToast('Operação cancelada.', 'info'); }} className="px-3 py-2 rounded-md bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-white">Cancelar</button>
-                <button type="button" onClick={handleConfirmDup} className="px-3 py-2 rounded-md bg-[#0D9488] hover:bg-[#0F766E] text-white font-bold uppercase text-[10px] tracking-wider transition-colors shadow-md shadow-[#0D9488]/15">Salvar</button>
+                <button type="button" onClick={cancelDuplicate} disabled={loading} className="px-3 py-2 rounded-md bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-white">Cancelar</button>
+                <button type="button" onClick={handleConfirmDup} disabled={loading} className="px-3 py-2 rounded-md bg-[#0D9488] hover:bg-[#0F766E] text-white font-bold uppercase text-[10px] tracking-wider transition-colors shadow-md shadow-[#0D9488]/15">Salvar</button>
             </div>
         </Modal>
         {/* Inline Create Modals rendered outside the main form to avoid nested form issues */}

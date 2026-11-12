@@ -5,11 +5,9 @@ import { TrendingUpIcon } from './icons';
 import { simulateInvestmentPurchase, getMarketData, MarketInfo } from '../services/marketDataService';
 import { useToast } from '../context/ToastContext';
 import {
-    calculatePvp,
-    calculateBazinPrice,
-    calculateGrahamPrice,
     calculateSafetyMargin,
 } from '../utils/investmentValuation';
+import { getInvestmentSimulationInputs, resolveSimulationAssetClass } from '../utils/investmentSimulationInputs';
 import { B3_FUNDAMENTAL_BENCHMARKS } from '../utils/b3Benchmarks';
 import { MonteCarloSimulator } from './MonteCarloSimulator';
 import { StressTestLab } from './StressTestLab';
@@ -43,7 +41,8 @@ export const InvestmentSimulator: React.FC = () => {
     const [showAdvancedParams, setShowAdvancedParams] = useState(false);
 
     const [loading, setLoading] = useState(false);
-    const [activeQuote, setActiveQuote] = useState<MarketInfo | null>(null);
+    const [quoteState, setQuoteState] = useState<{ ticker: string; quote: MarketInfo } | null>(null);
+    const activeQuote = quoteState?.ticker === ticker.trim().toUpperCase() ? quoteState.quote : null;
     const [simulationResult, setSimulationResult] = useState<string | null>(null);
     const [fetchingQuote, setFetchingQuote] = useState(false);
 
@@ -52,39 +51,42 @@ export const InvestmentSimulator: React.FC = () => {
 
     // Fetch quote on ticker change
     useEffect(() => {
-        if (!ticker.trim()) return;
-        const normalized = ticker.trim().toUpperCase();
-        
-        // Reset manual overrides when changing ticker
+        let cancelled = false;
+        setCustomPrice('');
+        setQuoteState(null);
+        setFetchingQuote(false);
+        // Reset all assumptions, including when the ticker is cleared.
         setCustomDividends('');
         setCustomVpa('');
         setCustomLpa('');
+        setSimulationResult(null);
+        if (!ticker.trim()) return;
+        const normalized = ticker.trim().toUpperCase();
 
         // Pre-fill default bazin rate depending on asset class
-        const isFii = normalized.endsWith('11') || ['O', 'VNQ', 'AMT'].includes(normalized);
+        const explicit = investments.find(i => i.ticker.toUpperCase() === normalized)?.type ?? marketData[normalized]?.assetClass;
+        const isFii = resolveSimulationAssetClass(normalized, explicit) === 'FII';
         setBazinRate(isFii ? 8.75 : 6);
 
         if (marketData[normalized]) {
-            setActiveQuote(marketData[normalized]);
-            setCustomPrice(marketData[normalized].price);
+            setQuoteState({ ticker: normalized, quote: marketData[normalized] });
         }
 
         const timer = setTimeout(async () => {
             setFetchingQuote(true);
             try {
                 const res = await getMarketData([normalized], true);
-                if (res.data[normalized]) {
-                    setActiveQuote(res.data[normalized]);
-                    setCustomPrice(res.data[normalized].price);
+                if (!cancelled && res.data[normalized]) {
+                    setQuoteState({ ticker: normalized, quote: res.data[normalized] });
                 }
             } catch (e) {
                 console.warn('Failed to fetch ticker quote:', e);
             } finally {
-                setFetchingQuote(false);
+                if (!cancelled) setFetchingQuote(false);
             }
         }, 350);
 
-        return () => clearTimeout(timer);
+        return () => { cancelled = true; clearTimeout(timer); };
     }, [ticker]);
 
     // Benchmark reference fundamentals for current ticker
@@ -93,96 +95,27 @@ export const InvestmentSimulator: React.FC = () => {
         return B3_FUNDAMENTAL_BENCHMARKS[norm] || null;
     }, [ticker]);
 
-    // Effective values (User Custom Input > Live API Quote > Benchmark)
-    const effectivePrice = useMemo(() => {
-        if (customPrice !== '' && Number(customPrice) > 0) return Number(customPrice);
-        if (activeQuote?.price && activeQuote.price > 0) return activeQuote.price;
-        return 0;
-    }, [customPrice, activeQuote]);
-
-    const effectiveDividends = useMemo(() => {
-        if (customDividends !== '' && Number(customDividends) >= 0) return Number(customDividends);
-        if (activeQuote?.dividends12m && activeQuote.dividends12m > 0) return activeQuote.dividends12m;
-        if (benchmark?.dividends12m !== undefined && benchmark.dividends12m >= 0) return benchmark.dividends12m;
-        return 0;
-    }, [customDividends, activeQuote, benchmark]);
-
-    const effectiveVpa = useMemo(() => {
-        if (customVpa !== '' && Number(customVpa) > 0) return Number(customVpa);
-        if (activeQuote?.vpa && activeQuote.vpa > 0) return activeQuote.vpa;
-        if (benchmark?.vpa && benchmark.vpa > 0) return benchmark.vpa;
-        return 0;
-    }, [customVpa, activeQuote, benchmark]);
-
-    const effectiveLpa = useMemo(() => {
-        if (customLpa !== '' && Number(customLpa) > 0) return Number(customLpa);
-        if (activeQuote?.lpa && activeQuote.lpa > 0) return activeQuote.lpa;
-        if (benchmark?.lpa && benchmark.lpa > 0) return benchmark.lpa;
-        return 0;
-    }, [customLpa, activeQuote, benchmark]);
-
-    const isCrypto = useMemo(() => {
-        const t = ticker.trim().toUpperCase();
-        return ['BTC', 'ETH', 'SOL', 'BTCBRL', 'ETHBRL', 'SOLBRL', 'XRP', 'ADA', 'BNB'].includes(t);
-    }, [ticker]);
-
-    const isFii = useMemo(() => {
-        const t = ticker.trim().toUpperCase();
-        return (t.endsWith('11') && !['BOVA11', 'SMAL11', 'IVVB11', 'HASH11'].includes(t)) || ['O', 'VNQ', 'AMT'].includes(t);
-    }, [ticker]);
-
-    // ─── LIVE DYNAMIC VALUATION CALCULATIONS (NEVER STATIC) ───────────────────────────
-    
-    // 1. Dynamic P/VP = Price / VPA
-    const livePvp = useMemo(() => {
-        const calculated = calculatePvp(effectivePrice, effectiveVpa);
-        return calculated !== null ? calculated : (activeQuote?.pvp ?? null);
-    }, [effectivePrice, effectiveVpa, activeQuote]);
-
-    // 2. Bazin Ceiling Price = Dividends12M / (Rate / 100)
-    const liveBazinPrice = useMemo(() => {
-        const calculated = calculateBazinPrice(effectiveDividends, bazinRate);
-        return calculated !== null ? calculated : (activeQuote?.bazinPrice ?? null);
-    }, [effectiveDividends, bazinRate, activeQuote]);
-
-    const liveBazinMargin = useMemo(() => {
-        return calculateSafetyMargin(liveBazinPrice, effectivePrice);
-    }, [liveBazinPrice, effectivePrice]);
-
-    // 3. Graham Fair Price
-    // For Equities: V = sqrt(22.5 * LPA * VPA)
-    // For FIIs: V = VPA (Accounting Fair Value)
-    const liveGrahamPrice = useMemo(() => {
-        if (isFii) {
-            return effectiveVpa > 0 ? effectiveVpa : (activeQuote?.grahamPrice ?? null);
-        }
-        const calculated = calculateGrahamPrice(effectiveLpa, effectiveVpa);
-        return calculated !== null ? calculated : (activeQuote?.grahamPrice ?? null);
-    }, [isFii, effectiveLpa, effectiveVpa, activeQuote]);
-
-    const liveGrahamMargin = useMemo(() => {
-        return calculateSafetyMargin(liveGrahamPrice, effectivePrice);
-    }, [liveGrahamPrice, effectivePrice]);
-
-    // 4. FII Ceiling Price (Spread NTN-B 8.75% a.a.)
-    const liveFiiCeiling = useMemo(() => {
-        if (effectiveDividends > 0) {
-            return Math.round((effectiveDividends / 0.0875) * 100) / 100;
-        }
-        return activeQuote?.fiiCeilingPrice ?? null;
-    }, [effectiveDividends, activeQuote]);
-
-    const liveFiiMargin = useMemo(() => {
-        return calculateSafetyMargin(liveFiiCeiling, effectivePrice);
-    }, [liveFiiCeiling, effectivePrice]);
-
-    // 5. Dividend Yield Dinâmico
-    const liveDy = useMemo(() => {
-        if (effectiveDividends > 0 && effectivePrice > 0) {
-            return (effectiveDividends / effectivePrice) * 100;
-        }
-        return activeQuote?.dividendYield ? activeQuote.dividendYield * 100 : 0;
-    }, [effectiveDividends, effectivePrice, activeQuote]);
+    const inputs = getInvestmentSimulationInputs({
+        ticker,
+        assetClass: investments.find(i => i.ticker.toUpperCase() === ticker.trim().toUpperCase())?.type ?? activeQuote?.assetClass,
+        quote: activeQuote, benchmark, minimumYieldRate: bazinRate,
+        manual: { price: customPrice, dividends12m: customDividends, vpa: customVpa, lpa: customLpa },
+    });
+    const effectivePrice = inputs.price.value ?? 0;
+    const effectiveDividends = inputs.dividends.value ?? 0;
+    const effectiveVpa = inputs.vpa.value ?? 0;
+    const effectiveLpa = inputs.lpa.value ?? 0;
+    const isCrypto = inputs.assetClass === 'CRYPTO';
+    const isFii = inputs.assetClass === 'FII';
+    const livePvp = inputs.pvp;
+    const liveBazinPrice = inputs.bazinPrice;
+    const liveGrahamPrice = inputs.grahamPrice;
+    const liveFiiCeiling = inputs.fiiCeilingPrice;
+    const liveBazinMargin = calculateSafetyMargin(liveBazinPrice, effectivePrice);
+    const liveGrahamMargin = calculateSafetyMargin(liveGrahamPrice, effectivePrice);
+    const liveFiiMargin = calculateSafetyMargin(liveFiiCeiling, effectivePrice);
+    const liveDy = inputs.dividendYield ?? 0;
+    const hasEstimates = [inputs.price, inputs.dividends, inputs.vpa, inputs.lpa].some(value => value.source === 'benchmark');
 
     // 6. Projeção de Renda Passiva
     const estAnnualIncome = useMemo(() => {
@@ -213,6 +146,11 @@ export const InvestmentSimulator: React.FC = () => {
                 badgeClass: 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-400 border-indigo-500/20',
                 desc: 'Criptoativos não possuem balanço ou dividendos. Gestão de risco: limite entre 2% a 5% da carteira.'
             };
+        }
+        if (hasEstimates || inputs.assetClass === 'OTHER' || (liveGrahamPrice === null && liveBazinPrice === null)) {
+            return { title: 'Simulação com premissas limitadas', badge: 'Sem recomendação',
+                badgeClass: 'bg-amber-500/15 text-amber-700',
+                desc: 'Classe não confirmada, fundamentos insuficientes ou benchmark estático. Revise as fontes e premissas; não há evidência para recomendar compra.' };
         }
         if (isFii) {
             if (livePvp !== null && livePvp < 0.98 && (liveFiiMargin ?? 0) >= 0) {
@@ -271,10 +209,10 @@ export const InvestmentSimulator: React.FC = () => {
             badgeClass: 'bg-slate-500/15 text-slate-700 dark:text-slate-300 border-slate-500/20',
             desc: 'Múltiplos em linha com a média histórica. Recomenda-se aportes regulares sem antecipação excessiva.'
         };
-    }, [isCrypto, isFii, livePvp, liveFiiMargin, liveGrahamMargin, liveBazinMargin, liveDy]);
+    }, [isCrypto, isFii, livePvp, liveFiiMargin, liveGrahamMargin, liveBazinMargin, liveDy, hasEstimates, inputs.assetClass, liveGrahamPrice, liveBazinPrice]);
 
     const handleSimulate = async () => {
-        if (!ticker.trim() || !amount || amount <= 0) {
+        if (!ticker.trim() || !amount || amount <= 0 || inputs.assetClass === 'OTHER' || hasEstimates) {
             showToast('Informe um ativo válido e o valor a aportar.', 'warning');
             return;
         }
@@ -316,9 +254,9 @@ export const InvestmentSimulator: React.FC = () => {
         setCustomDividends('');
         setCustomVpa('');
         setCustomLpa('');
-        if (activeQuote?.price) setCustomPrice(activeQuote.price);
+        setCustomPrice('');
         setBazinRate(isFii ? 8.75 : 6);
-        showToast('Parâmetros restaurados com a base oficial de mercado.', 'info');
+        showToast('Premissas manuais removidas. Confira a origem dos dados disponíveis.', 'info');
     };
 
     return (
@@ -405,10 +343,19 @@ export const InvestmentSimulator: React.FC = () => {
                         <div className="flex items-center justify-between mb-2">
                             <h4 className="text-label-caps !text-slate-400">Configuração do Aporte</h4>
                             <span className="text-[10px] font-bold text-[#0D9488] uppercase tracking-wider">
-                                {isFii ? 'Fundo Imobiliário' : isCrypto ? 'Criptoativo' : 'Ação B3'}
+                                {isFii ? 'Fundo Imobiliário' : isCrypto ? 'Criptoativo' : inputs.assetClass === 'STOCK' ? 'Ação / Unit' : 'Classe não confirmada'}
                             </span>
                         </div>
 
+                        <div className="text-xs text-slate-500 space-y-1 mb-3" role="status">
+                            {([['Preço', inputs.price], ['Proventos 12m', inputs.dividends], ['VPA', inputs.vpa], ['LPA', inputs.lpa]] as const).map(([label, entry]) => (
+                                <p key={label}>{label}: {entry.value === null ? 'n/d' : formatCurrency(entry.value)} — {
+                                    entry.source === 'manual' ? 'premissa informada' : entry.source === 'quote' ? 'retorno do serviço de mercado; fonte primária e período não informados'
+                                    : entry.source === 'benchmark' ? 'ESTIMATIVA: benchmark estático local; fonte primária e período não informados' : 'ausente: sem fonte disponível'
+                                }{entry.invalid ? ' (valor inválido; não substituído)' : ''}</p>
+                            ))}
+                            <p>Retorno do serviço pode conter estimativas upstream. Atualidade não verificada. Taxa FII de 8,75% é premissa fixa, não cotação atual de NTN-B.</p>
+                        </div>
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Ativo Pretendido (Ticker)</label>
                         <div className="relative">
                             <input 
@@ -534,7 +481,7 @@ export const InvestmentSimulator: React.FC = () => {
                             {/* Card 3: Preço Justo de Graham */}
                             <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200/70 dark:border-slate-700/60">
                                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">
-                                    {isFii ? 'Graham FII (VPA)' : 'Graham Justo'}
+                                    {isFii ? 'Referência Patrimonial (VPA)' : 'Graham Justo'}
                                 </span>
                                 <div className="flex items-center gap-1 mt-0.5">
                                     <span className="font-black text-slate-900 dark:text-white text-sm tabular-nums">
@@ -553,11 +500,11 @@ export const InvestmentSimulator: React.FC = () => {
                                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">DY 12M Projetado</span>
                                 <div className="flex items-center gap-1 mt-0.5">
                                     <span className="font-black text-[#0D9488] dark:text-teal-400 text-sm tabular-nums">
-                                        {liveDy > 0 ? `${liveDy.toFixed(2)}%` : 'n/d'}
+                                        {inputs.dividendYield !== null ? `${inputs.dividendYield.toFixed(2)}%` : 'n/d'}
                                     </span>
                                 </div>
                                 <span className="text-[9px] text-slate-400 block mt-0.5">
-                                    Proventos: {effectiveDividends > 0 ? formatCurrency(effectiveDividends) : 'n/d'}/ano
+                                    Proventos: {inputs.dividends.value !== null ? formatCurrency(inputs.dividends.value) : 'n/d'}/ano
                                 </span>
                             </div>
 
@@ -634,7 +581,7 @@ export const InvestmentSimulator: React.FC = () => {
                                         >
                                             <option value={6}>6.0% (Bazin Clássico Ações)</option>
                                             <option value={8}>8.0% (Conservador)</option>
-                                            <option value={8.75}>8.75% (Spread NTN-B FIIs)</option>
+                                            <option value={8.75}>8.75% (Premissa fixa FIIs)</option>
                                             <option value={10}>10.0% (Exigente / FII Papel)</option>
                                             <option value={12}>12.0% (Alto Risco)</option>
                                         </select>
@@ -678,7 +625,7 @@ export const InvestmentSimulator: React.FC = () => {
                     {/* Submit Button */}
                     <button
                         onClick={handleSimulate}
-                        disabled={loading || !effectivePrice || effectivePrice <= 0}
+                        disabled={loading || !effectivePrice || effectivePrice <= 0 || hasEstimates || inputs.assetClass === 'OTHER'}
                         className="w-full py-3.5 bg-[#0D9488] hover:bg-[#0F766E] text-white rounded-xl font-bold uppercase tracking-widest text-[10px] active:scale-95 shadow-md shadow-teal-600/20 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                     >
                         {loading ? (
@@ -739,7 +686,7 @@ export const InvestmentSimulator: React.FC = () => {
 
                     <div className="pt-4 mt-6 border-t border-slate-200/60 dark:border-slate-800 text-[10px] text-slate-400 flex flex-col sm:flex-row items-center justify-between gap-2">
                         <span>Gestor Financeiro · Valuation Fundamentalista Graham & Bazin</span>
-                        <span>* Métricas 100% calculadas dinamicamente com dados da B3/CVM.</span>
+                        <span>* Cálculos usam dados do provedor, premissas informadas ou benchmarks estimados; confira a origem e a atualidade dos dados.</span>
                     </div>
                 </div>
 

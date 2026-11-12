@@ -1,5 +1,6 @@
 import React from 'react';
 import { useFinancialData } from '../context/FinancialDataContext';
+import { useAuth } from '../context/AuthContext';
 import { formatCurrency } from '../utils/formatters';
 import { isIncomeTx, isExpenseTx, isTransferTx, calculateAccountBalances } from '../utils/transactionHelpers';
 import { PayablesList } from './PayablesList';
@@ -28,6 +29,7 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
   onEditTransaction
 }) => {
   const { showToast } = useToast();
+  const { user } = useAuth();
   const tab = activeSubTab;
   const setTab = setActiveSubTab;
 
@@ -64,6 +66,10 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
   const [accountId, setAccountId] = React.useState('');
   const [party, setParty] = React.useState('');
   const [notes, setNotes] = React.useState('');
+  const [isBusinessObligation, setIsBusinessObligation] = React.useState(false);
+  const [savingObligation, setSavingObligation] = React.useState(false);
+  const pendingObligation = React.useRef<{ fingerprint: string; operationId: string } | null>(null);
+  const obligationSubmitting = React.useRef(false);
   
   // Category Creation State
   const [isNewCategoryOpen, setIsNewCategoryOpen] = React.useState(false);
@@ -86,6 +92,9 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
     planInfo,
     subscriptionInfo
   } = useFinancialData();
+  const currentIdentity = `${user?.id || ''}:${viewMode}`;
+  const identityRef = React.useRef(currentIdentity);
+  identityRef.current = currentIdentity;
   const isTrialActive = !!(subscriptionInfo?.isTrial && !subscriptionInfo?.isExpired);
   const isStarterLocked = (planInfo?.tier === 'starter') && !isTrialActive;
   const [snapshotReceivables, setSnapshotReceivables] = React.useState<any[]>([]);
@@ -323,16 +332,38 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
   
   const submitNew = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (obligationSubmitting.current) return;
+    obligationSubmitting.current = true;
+    setSavingObligation(true);
+    const submittedIdentity = identityRef.current;
     try {
       const payload = newType === 'ap'
-        ? { type: 'payables_insert', data: { title, amount: Number(amount || 0), issueDate: (issueDate || null), dueDate, category: (category || null), costCenterId: (costCenterId || null), supplier: (party || null), notes: (notes || null) } }
-        : { type: 'receivables_insert', data: { title, amount: Number(amount || 0), issueDate: (issueDate || null), dueDate, category: (category || null), costCenterId: (costCenterId || null), customer: (party || null), notes: (notes || null) } };
-      await fetch('/api/query', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(payload) });
+        ? { type: 'payables_insert', data: { title, amount: Number(amount || 0), issueDate: (issueDate || null), dueDate, category: (category || null), costCenterId: (costCenterId || null), supplier: (party || null), notes: (notes || null), isBusinessExpense: isBusinessObligation } }
+        : { type: 'receivables_insert', data: { title, amount: Number(amount || 0), issueDate: (issueDate || null), dueDate, category: (category || null), costCenterId: (costCenterId || null), customer: (party || null), notes: (notes || null), isBusinessRevenue: isBusinessObligation } };
+      const fingerprint = JSON.stringify({ identity: submittedIdentity, payload });
+      if (pendingObligation.current && pendingObligation.current.fingerprint !== fingerprint) {
+        throw new Error('Há um envio com resultado incerto. Restaure os dados enviados e confirme o resultado antes de criar outra obrigação.');
+      }
+      pendingObligation.current ||= { fingerprint, operationId: crypto.randomUUID() };
+      const response = await fetch('/api/query', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ ...payload, data: { ...payload.data, operationId: pendingObligation.current.operationId } }) });
+      if (!response.ok) {
+        if (response.status >= 400 && response.status < 500) pendingObligation.current = null;
+        throw new Error('Não foi possível confirmar o lançamento. Os dados foram preservados para revisão ou nova tentativa.');
+      }
+      const confirmed = await response.json();
+      if (!confirmed.rows?.[0]?.id) throw new Error('Resposta sem confirmação da obrigação. Tente novamente com os mesmos dados.');
+      pendingObligation.current = null;
+      if (identityRef.current !== submittedIdentity) return;
       setShowModal(false);
-      setTitle(''); setAmount(''); setIssueDate(''); setCategory(''); setCostCenterId(''); setParty(''); setNotes('');
+      setTitle(''); setAmount(''); setIssueDate(''); setCategory(''); setCostCenterId(''); setParty(''); setNotes(''); setIsBusinessObligation(false);
       setReloadKey(k => k + 1);
       loadSnapshots();
-    } catch {}
+    } catch (error) {
+      if (identityRef.current === submittedIdentity) showToast?.(error instanceof Error ? error.message : 'Erro ao registrar obrigação.', 'error');
+    } finally {
+      obligationSubmitting.current = false;
+      setSavingObligation(false);
+    }
   };
   const handleGenerateAiAudit = async () => {
     setIsGeneratingAudit(true);
@@ -1048,6 +1079,10 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
                   placeholder={newType==='ap'?'Ex: Empresa Logística S.A.':'Ex: Cliente VIP'} 
                 />
               </div>
+              <label className="flex items-center gap-3 text-sm md:col-span-2">
+                <input type="checkbox" checked={isBusinessObligation} onChange={e => setIsBusinessObligation(e.target.checked)} />
+                {newType === 'ar' ? 'Receita da atividade empresarial (não inclui empréstimos ou aportes)' : 'Despesa da atividade empresarial'}
+              </label>
               <div className="space-y-2.5 md:col-span-2">
                 <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Notas Administrativas</label>
                 <textarea 
@@ -1072,7 +1107,7 @@ const FinanceAccounting: React.FC<FinanceAccountingProps> = ({
                 type="submit" 
                 className="px-8 py-3 bg-[#0D9488] hover:bg-[#0F766E] text-white text-[11px] font-bold uppercase tracking-widest rounded-xl transition-all shadow-md shadow-[#0D9488]/20"
               >
-                Confirmar Lançamento
+                {savingObligation ? 'Confirmando...' : 'Confirmar Lançamento'}
               </button>
             </div>
           </form>

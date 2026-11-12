@@ -8,6 +8,7 @@ import { calculateMeiMonthlyClosing } from '../utils/meiMonthlyClosing';
 
 import { getPool } from './_db';
 import { disposeInvestment } from './_investmentOperation';
+import { createObligation } from './_obligationCreation';
 import { listTransactions, settleObligation, patchInvestment, financialSnapshot, financialTransactions, resolveFinancialScope, type FinancialDatabase } from './_financial';
 
 const isNoDb = (): boolean => !process.env.NEON_DATABASE_URL && !process.env.DATABASE_URL;
@@ -841,21 +842,19 @@ export default async function handler(req: any, res: any) {
         }
         r = await db.query(`select * from public.payables where ${where} order by due_date asc, created_at desc`, params);
     } else if (type === 'payables_insert') {
-        const { title, amount, issueDate, dueDate, category, costCenterId, supplier, notes } = data;
-        if (!(await checkWritePermission(costCenterId || null))) throw new Error('permission_denied_cc');
-        const id = crypto.randomUUID();
-        const targetOrgId = orgId || null;
-        if (category) await ensureCategory(userId, category, 'Saída');
-        await enforceTxQuota(id, dueDate || new Date().toISOString());
-        r = await db.query('insert into public.payables(id,user_id,org_id,title,status,amount,issue_date,due_date,category,cost_center_id,supplier,notes) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *', [id, userId, targetOrgId, title, 'open', amount, issueDate || null, dueDate, category, costCenterId, supplier, notes]);
+        if (!(await checkWritePermission(data.costCenterId || null))) throw new Error('permission_denied_cc');
+        const created = await createObligation(db, { userId, orgId }, 'payable', data, enforceTxQuota);
+        if (data.category) await ensureCategory(userId, data.category, 'Saída');
+        res.statusCode = 200; res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify(created)); return;
     } else if (type === 'payables_update') {
-        const { id, title, amount, issueDate, dueDate, category, costCenterId, supplier, notes, status } = data;
+        const { id, title, amount, issueDate, dueDate, category, costCenterId, supplier, notes, status, isBusinessExpense } = data;
         if (!(await checkWritePermission(costCenterId || null, id, 'payables'))) throw new Error('permission_denied_cc');
         
         if (orgId) {
-            r = await db.query('update public.payables set title=$1, amount=$2, issue_date=$3, due_date=$4, category=$5, cost_center_id=$6, supplier=$7, notes=$8, status=coalesce($9,status), updated_at=now() where id=$10 and org_id=$11 returning *', [title, amount, issueDate, dueDate, category, costCenterId, supplier, notes, status, id, orgId]);
+            r = await db.query('update public.payables set title=$1, amount=$2, issue_date=$3, due_date=$4, category=$5, cost_center_id=$6, supplier=$7, notes=$8, status=coalesce($9,status), is_business_expense=coalesce($12,is_business_expense), updated_at=now() where id=$10 and org_id=$11 returning *', [title, amount, issueDate, dueDate, category, costCenterId, supplier, notes, status, id, orgId, typeof isBusinessExpense === 'boolean' ? isBusinessExpense : null]);
         } else {
-            r = await db.query('update public.payables set title=$1, amount=$2, issue_date=$3, due_date=$4, category=$5, cost_center_id=$6, supplier=$7, notes=$8, status=coalesce($9,status), updated_at=now() where id=$10 and user_id=$11 and org_id is null returning *', [title, amount, issueDate, dueDate, category, costCenterId, supplier, notes, status, id, userId]);
+            r = await db.query('update public.payables set title=$1, amount=$2, issue_date=$3, due_date=$4, category=$5, cost_center_id=$6, supplier=$7, notes=$8, status=coalesce($9,status), is_business_expense=coalesce($12,is_business_expense), updated_at=now() where id=$10 and user_id=$11 and org_id is null returning *', [title, amount, issueDate, dueDate, category, costCenterId, supplier, notes, status, id, userId, typeof isBusinessExpense === 'boolean' ? isBusinessExpense : null]);
         }
     } else if (type === 'payables_delete') {
         if (!(await checkWritePermission(undefined, data.id, 'payables'))) throw new Error('permission_denied_cc');
@@ -907,21 +906,19 @@ export default async function handler(req: any, res: any) {
         }
         r = await db.query(`select * from public.receivables where ${where} order by due_date asc, created_at desc`, params);
     } else if (type === 'receivables_insert') {
-        const { title, amount, issueDate, dueDate, category, costCenterId, customer, notes } = data;
-        if (!(await checkWritePermission(costCenterId || null))) throw new Error('permission_denied_cc');
-        const id = crypto.randomUUID();
-        const targetOrgId = orgId || null;
-        if (category) await ensureCategory(userId, category, 'Entrada');
-        await enforceTxQuota(id, dueDate || new Date().toISOString());
-        r = await db.query('insert into public.receivables(id,user_id,org_id,title,status,amount,issue_date,due_date,category,cost_center_id,customer,notes) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *', [id, userId, targetOrgId, title, 'open', amount, issueDate || null, dueDate, category, costCenterId, customer, notes]);
+        if (!(await checkWritePermission(data.costCenterId || null))) throw new Error('permission_denied_cc');
+        const created = await createObligation(db, { userId, orgId }, 'receivable', data, enforceTxQuota);
+        if (data.category) await ensureCategory(userId, data.category, 'Entrada');
+        res.statusCode = 200; res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify(created)); return;
     } else if (type === 'receivables_update') {
-        const { id, title, amount, issueDate, dueDate, category, costCenterId, customer, notes, status } = data;
+        const { id, title, amount, issueDate, dueDate, category, costCenterId, customer, notes, status, isBusinessRevenue } = data;
         if (!(await checkWritePermission(costCenterId || null, id, 'receivables'))) throw new Error('permission_denied_cc');
         
         if (orgId) {
-             r = await db.query('update public.receivables set title=$1, amount=$2, issue_date=$3, due_date=$4, category=$5, cost_center_id=$6, customer=$7, notes=$8, status=coalesce($9,status), updated_at=now() where id=$10 and org_id=$11 returning *', [title, amount, issueDate, dueDate, category, costCenterId, customer, notes, status, id, orgId]);
+             r = await db.query('update public.receivables set title=$1, amount=$2, issue_date=$3, due_date=$4, category=$5, cost_center_id=$6, customer=$7, notes=$8, status=coalesce($9,status), is_business_revenue=coalesce($12,is_business_revenue), updated_at=now() where id=$10 and org_id=$11 returning *', [title, amount, issueDate, dueDate, category, costCenterId, customer, notes, status, id, orgId, typeof isBusinessRevenue === 'boolean' ? isBusinessRevenue : null]);
         } else {
-             r = await db.query('update public.receivables set title=$1, amount=$2, issue_date=$3, due_date=$4, category=$5, cost_center_id=$6, customer=$7, notes=$8, status=coalesce($9,status), updated_at=now() where id=$10 and user_id=$11 and org_id is null returning *', [title, amount, issueDate, dueDate, category, costCenterId, customer, notes, status, id, userId]);
+             r = await db.query('update public.receivables set title=$1, amount=$2, issue_date=$3, due_date=$4, category=$5, cost_center_id=$6, customer=$7, notes=$8, status=coalesce($9,status), is_business_revenue=coalesce($12,is_business_revenue), updated_at=now() where id=$10 and user_id=$11 and org_id is null returning *', [title, amount, issueDate, dueDate, category, costCenterId, customer, notes, status, id, userId, typeof isBusinessRevenue === 'boolean' ? isBusinessRevenue : null]);
         }
     } else if (type === 'receivables_delete') {
         if (!(await checkWritePermission(undefined, data.id, 'receivables'))) throw new Error('permission_denied_cc');
@@ -1041,7 +1038,19 @@ export default async function handler(req: any, res: any) {
         res.end(JSON.stringify({ error: code }));
         return;
     }
-    if (code.startsWith('invalid_investment_') || code === 'investment_insufficient_quantity' || code === 'invalid_date_range' || code.startsWith('invalid_settlement_') || code === 'settlement_operation_conflict' || code === 'invalid_transaction_cursor' || code.startsWith('mei_obligation_') || code === 'mei_profile_required' || code === 'invalid_mei_obligation') {
+    if (code === 'obligation_schema_required') {
+        res.statusCode = 503;
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ error: code }));
+        return;
+    }
+    if (code === 'obligation_operation_conflict') {
+        res.statusCode = 409;
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ error: code }));
+        return;
+    }
+    if (code.startsWith('invalid_obligation_') || code.startsWith('invalid_investment_') || code === 'investment_insufficient_quantity' || code === 'invalid_date_range' || code.startsWith('invalid_settlement_') || code === 'settlement_operation_conflict' || code === 'invalid_transaction_cursor' || code.startsWith('mei_obligation_') || code === 'mei_profile_required' || code === 'invalid_mei_obligation') {
         res.statusCode = 400;
         res.setHeader('content-type','application/json');
         res.end(JSON.stringify({ error: code }));

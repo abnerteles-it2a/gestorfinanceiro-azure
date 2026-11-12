@@ -54,7 +54,7 @@ export async function settleObligation(pool: {connect(): Promise<FinancialDataba
     const txId = crypto.randomUUID();
     const date = data[kind === 'payable' ? 'paidDate' : 'receivedDate'] || row.due_date;
     if (beforeInsert) await beforeInsert(txId,date instanceof Date ? date.toISOString().slice(0,10) : String(date),client);
-    const tx = (await client.query('insert into public.transactions(id,user_id,date,account_id,to_account_id,transaction_type,category,description,amount,payment_method,cost_center_id,org_id) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *',[txId,scope.userId,date,data.accountId,null,kind === 'payable' ? 'Saída' : 'Entrada',row.category || (kind === 'payable' ? 'Contas a Pagar' : 'Contas a Receber'),data.description || row.title,cash/100,data.paymentMethod || null,row.cost_center_id,scope.orgId])).rows[0];
+    const tx = (await client.query('insert into public.transactions(id,user_id,date,account_id,to_account_id,transaction_type,category,description,amount,payment_method,cost_center_id,org_id,is_business_revenue,is_business_expense) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning *',[txId,scope.userId,date,data.accountId,null,kind === 'payable' ? 'Saída' : 'Entrada',row.category || (kind === 'payable' ? 'Contas a Pagar' : 'Contas a Receber'),data.description || row.title,cash/100,data.paymentMethod || null,row.cost_center_id,scope.orgId,kind === 'receivable' && row.is_business_revenue === true,kind === 'payable' && row.is_business_expense === true])).rows[0];
     const cumulative = (cents(settled)+principal)/100;
     const status = cents(cumulative) >= cents(row.amount) ? (kind === 'payable' ? 'paid' : 'received') : 'open';
     const updateParams: any[] = [status,cumulative,txId,data.id];

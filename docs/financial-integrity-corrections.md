@@ -1,7 +1,11 @@
 # Correções de integridade financeira
 
-## Estado da entrega
-Implementação em andamento na branch `fix/financial-integrity-advisor`. Não houve deploy, commit, migração remota ou chamadas pagas de IA. Alterações pré-existentes em `api/query.ts`, `.agents/memory` e `mobile/` devem ser preservadas.
+## Como interpretar este histórico
+
+Este documento registra etapas sucessivas, incluindo pendências posteriormente corrigidas e declarações de implantação de sessões anteriores. O estado local verificado em 12/11/2026, as lacunas remanescentes e os limites da validação estão em [CONTEXT.md](../CONTEXT.md#estado-verificado-do-produto--12112026). Não tratar contagens antigas de testes ou afirmações históricas de deploy como comprovação da instalação atual.
+
+## Estado da entrega na etapa inicial
+Implementação então em andamento na branch `fix/financial-integrity-advisor`. Naquela etapa, não houve deploy, commit, migração remota ou chamadas pagas de IA. Alterações pré-existentes em `api/query.ts`, `.agents/memory` e `mobile/` deveriam ser preservadas.
 
 ## Regressões executadas pelo coordenador
 | Comportamento | Red observado | Correção | Verificação |

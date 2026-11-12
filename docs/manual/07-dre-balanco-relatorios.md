@@ -28,7 +28,9 @@ Mede a riqueza e solidez acumulada no tempo:
 - Relatórios gerenciais e pareceres de IA não garantem conformidade contábil ou fiscal. Valide classificação, completude e período com a pessoa responsável pela contabilidade.
 
 ### 7.3.1 Cartão e fatura
-A compra no crédito e o pagamento da fatura são eventos distintos. O núcleo de ciclos e parcelas já dispõe de regras testadas, mas sua integração de cadastro, persistência e telas ainda está pendente. Até essa integração, não cadastre compra e pagamento como duas saídas independentes: revise os registros legados e não presuma conciliação automática.
+A compra no crédito e o pagamento da fatura são eventos distintos. O cadastro web agenda parcelas como contas a pagar, inclusive quando vencidas: vencimento não confirma pagamento. Cadastro normal e confirmação de possível duplicidade preservam esse comportamento, enviam a visão selecionada e validam a resposta HTTP. Em falha parcial, o modal preserva UUIDs e progresso para retomar sem repetir parcelas confirmadas; isso depende da [migração do journal](../../scripts/migrate_premium_integrity.sql). Não há atomicidade do conjunto de parcelas nem recuperação dos UUIDs após reload.
+
+A integração contábil continua parcial: a data de emissão e notas da compra não constituem um vínculo completo entre compra, fatura e liquidação nem uma DRE por competência. Não cadastre compra e pagamento como duas saídas independentes: revise os registros legados e não presuma conciliação automática.
 
 ### 7.4 Monitoramento e Obrigações Fiscais MEI
 Para microempreendedores individuais:
@@ -36,3 +38,5 @@ Para microempreendedores individuais:
 - **Termômetro MEI**: Widget visual no Dashboard que indica a porcentagem consumida do teto no ano corrente.
 - **Relatório Mensal de Receitas Brutas**: Gera o documento oficial com a segregação exigida por lei entre Comércio, Indústria e Serviços.
 - **Declaração Anual DASN-SIMEI**: Totaliza as receitas anuais para preenchimento direto no portal do Simples Nacional da Receita Federal.
+- **Completude**: monitor e relatórios usam o histórico financeiro completo, não apenas a página exibida. A classificação empresarial deve estar correta, inclusive nos títulos liquidados.
+- **DAS**: o vencimento estimado é dia 20 do mês seguinte à competência, deslocado para segunda-feira se cair no fim de semana. Vencimento cadastrado prevalece; feriados e prorrogações exigem calendário oficial/PGMEI ou override informado. Agendamento registra a obrigação DAS, não emite guia nem confirma pagamento bancário.

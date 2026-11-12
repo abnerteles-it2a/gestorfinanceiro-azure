@@ -1,10 +1,8 @@
-import { Pool } from 'pg';
-import { jwtVerify } from 'jose';
-import { randomUUID as uuidv4 } from 'crypto';
 import { verifySession } from '../_auth_shared';
 
 
 import { getPool } from '../_db';
+import { assertBillingSchema, registerBillingPayment } from '../_billing';
 
 export default async function handler(req: any, res: any) {
     if (req.method !== 'POST') {
@@ -33,6 +31,12 @@ export default async function handler(req: any, res: any) {
         const { tier, billingPeriod, method, cpfCnpj, creditCard, orgId } = body;
         const normalizedTier = String(tier || 'starter').toLowerCase();
         const normalizedBilling = (String(billingPeriod || 'monthly').toLowerCase() === 'yearly' || String(billingPeriod).toLowerCase() === 'annually') ? 'yearly' : 'monthly';
+        if (!['starter', 'plus', 'pro'].includes(normalizedTier)) {
+            res.statusCode = 400;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ success: false, error: 'Plano inválido.' }));
+            return;
+        }
 
         const addMonths = (d: Date, months: number) => {
             const x = new Date(d.getTime());
@@ -71,6 +75,8 @@ export default async function handler(req: any, res: any) {
         const amount = normalizedBilling === 'yearly' 
             ? (annualPrices[normalizedTier] || 300.00) 
             : (monthlyPrices[normalizedTier] || 30.00);
+
+        await assertBillingSchema(db);
 
         // 3. Asaas Customer Management
         let asaasCustomerId = profile?.asaas_customer_id;
@@ -129,76 +135,11 @@ export default async function handler(req: any, res: any) {
             throw new Error(pData.errors?.[0]?.description || 'Erro ao gerar fatura de pagamento.');
         }
 
-        // 5. Update Local Log
-        const subTable = orgId ? 'org_subscriptions' : 'user_subscriptions';
-        const subCol = orgId ? 'org_id' : 'user_id';
-        try { await db.query(`alter table public.user_subscriptions add column if not exists asaas_payment_id text`); } catch {}
-        try { await db.query(`alter table public.user_subscriptions add column if not exists created_at timestamptz default now()`); } catch {}
-        try { await db.query(`alter table public.user_subscriptions add column if not exists billing_period text`); } catch {}
-        try { await db.query(`alter table public.user_subscriptions add column if not exists requested_tier text`); } catch {}
-        try { await db.query(`alter table public.org_subscriptions add column if not exists asaas_payment_id text`); } catch {}
-        try { await db.query(`alter table public.org_subscriptions add column if not exists created_at timestamptz default now()`); } catch {}
-        try { await db.query(`alter table public.org_subscriptions add column if not exists billing_period text`); } catch {}
-        try { await db.query(`alter table public.org_subscriptions add column if not exists requested_tier text`); } catch {}
-        try { await db.query(`alter table public.org_subscriptions add column if not exists pending_payment_id text`); } catch {}
-        try { await db.query(`alter table public.org_subscriptions add column if not exists pending_billing_period text`); } catch {}
-        try { await db.query(`alter table public.org_subscriptions add column if not exists pending_requested_tier text`); } catch {}
-        try { await db.query(`alter table public.org_subscriptions add column if not exists pending_period_start timestamptz`); } catch {}
-        try { await db.query(`alter table public.org_subscriptions add column if not exists pending_period_end timestamptz`); } catch {}
-
-        if (orgId) {
-            const ex = await db.query('select status, period_end from public.org_subscriptions where org_id=$1', [orgId]);
-            const exSt = String(ex.rows[0]?.status || '').toLowerCase();
-            const exEnd = ex.rows[0]?.period_end ? new Date(ex.rows[0].period_end).getTime() : null;
-            const hasActive = ex.rows[0] && exSt === 'active' && (!exEnd || exEnd >= Date.now());
-            if (hasActive) {
-                await db.query(
-                    `update public.org_subscriptions
-                     set provider='asaas',
-                         pending_payment_id=$1,
-                         pending_billing_period=$2,
-                         pending_requested_tier=$3,
-                         pending_period_start=now(),
-                         pending_period_end=$4
-                     where org_id=$5`,
-                    [pData.id, normalizedBilling, normalizedTier, nextEnd, orgId]
-                );
-            } else {
-                await db.query(
-                    `insert into public.org_subscriptions(org_id, provider, status, asaas_payment_id, period_start, period_end, billing_period, requested_tier,
-                      pending_payment_id, pending_billing_period, pending_requested_tier, pending_period_start, pending_period_end)
-                     values($1,'asaas','pending',$2, now(), $3, $4, $5, $2, $4, $5, now(), $3)
-                     on conflict (org_id) do update set
-                       provider=excluded.provider,
-                       status=excluded.status,
-                       asaas_payment_id=excluded.asaas_payment_id,
-                       period_start=excluded.period_start,
-                       period_end=excluded.period_end,
-                       billing_period=excluded.billing_period,
-                       requested_tier=excluded.requested_tier,
-                       pending_payment_id=excluded.pending_payment_id,
-                       pending_billing_period=excluded.pending_billing_period,
-                       pending_requested_tier=excluded.pending_requested_tier,
-                       pending_period_start=excluded.pending_period_start,
-                       pending_period_end=excluded.pending_period_end`,
-                    [orgId, pData.id, nextEnd, normalizedBilling, normalizedTier]
-                );
-            }
-        } else {
-            await db.query(
-                `insert into public.user_subscriptions(user_id, provider, status, asaas_payment_id, period_start, period_end, billing_period, requested_tier)
-                 values($1,'asaas','pending',$2, now(), $3, $4, $5)
-                 on conflict (user_id) do update set
-                   provider=excluded.provider,
-                   status=excluded.status,
-                   asaas_payment_id=excluded.asaas_payment_id,
-                   period_start=excluded.period_start,
-                   period_end=excluded.period_end,
-                   billing_period=excluded.billing_period,
-                   requested_tier=excluded.requested_tier`,
-                [userId, pData.id, nextEnd, normalizedBilling, normalizedTier]
-            );
-        }
+        // Persist checkout without replacing an active paid subscription.
+        await registerBillingPayment(db, {
+            paymentId: pData.id, userId, orgId: orgId || null,
+            tier: normalizedTier, billingPeriod: normalizedBilling
+        }, nextEnd);
 
         // 6. Pix logic if UNDEFINED or pix method
         let pixData = null;
@@ -240,7 +181,5 @@ export default async function handler(req: any, res: any) {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify({ success: false, error: e?.message || 'Erro interno no processamento' }));
-    } finally {
-        await db.end(); // CRITICAL: Release connection back to RDS or close it
     }
 }

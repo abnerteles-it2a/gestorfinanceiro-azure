@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { billingPaymentsMigration } from '../_billingSchema';
 
 let pool: Pool | null = null;
 const getPool = () => {
@@ -61,6 +62,15 @@ const sqls: string[] = [
   'create table if not exists public.receivables (id uuid primary key, user_id uuid not null, org_id uuid, title text not null, amount numeric(14,2) not null, due_date date not null, status text not null default \'open\', category text, account_id uuid, cost_center_id uuid, notes text, created_at timestamptz default now())',
   'create index if not exists idx_receivables_user on public.receivables(user_id)',
   'create index if not exists idx_receivables_due on public.receivables(due_date)',
+  "create table if not exists public.obligation_creation_operations (scope_type text not null check (scope_type in ('personal','org')), scope_id uuid not null, operation_id uuid not null, user_id uuid not null, request_payload jsonb not null, result_payload jsonb not null, created_at timestamptz not null default now(), primary key (scope_type,scope_id,operation_id))",
+  'alter table public.payables add column if not exists is_business_revenue boolean not null default false',
+  'alter table public.payables add column if not exists is_business_expense boolean not null default false',
+  'alter table public.receivables add column if not exists is_business_revenue boolean not null default false',
+  'alter table public.receivables add column if not exists is_business_expense boolean not null default false',
+  'alter table public.payables add column if not exists issue_date date',
+  'alter table public.receivables add column if not exists issue_date date',
+  'alter table public.payables add column if not exists supplier text',
+  'alter table public.receivables add column if not exists customer text',
   'alter table public.payables add column if not exists paid_amount numeric(14,2) default 0',
   'alter table public.receivables add column if not exists received_amount numeric(14,2) default 0',
   'alter table public.payables add column if not exists transaction_id uuid',
@@ -74,6 +84,7 @@ const sqls: string[] = [
   'create table if not exists public.plans (id uuid primary key, name text not null, tier text not null, created_at timestamptz default now())',
   'create table if not exists public.user_subscriptions (id uuid primary key default gen_random_uuid(), user_id uuid not null, provider text, status text, plan_id uuid, current_period_end timestamptz, created_at timestamptz default now())',
   'create table if not exists public.org_subscriptions (id uuid primary key default gen_random_uuid(), org_id uuid not null, provider text, status text, plan_id uuid, current_period_end timestamptz, created_at timestamptz default now())',
+  billingPaymentsMigration,
   'alter table public.transactions add column if not exists is_business_revenue boolean not null default false',
   'alter table public.transactions add column if not exists is_business_expense boolean not null default false',
   'alter table public.transactions add column if not exists org_id uuid',

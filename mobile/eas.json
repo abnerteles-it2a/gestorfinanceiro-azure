@@ -1,0 +1,32 @@
+{
+  "cli": {
+    "version": ">= 3.0.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "http://192.168.0.103:3010/api"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://ca-gestor-staging.politewave-3dbe78b6.eastus2.azurecontainerapps.io/api"
+      }
+    },
+    "production": {
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://ca-gestor-staging.politewave-3dbe78b6.eastus2.azurecontainerapps.io/api"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
+

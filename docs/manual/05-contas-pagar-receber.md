@@ -17,7 +17,10 @@ Enquanto o Fluxo de Caixa acompanha o dinheiro que já entrou ou saiu da conta b
    - **Categoria**: Associação orçamentária.
    - **Fornecedor / Cliente**: Entidade relacionada.
    - **Conta Bancária de Vinculação**: Conta de onde sairá ou onde entrará o recurso quando for liquidado.
-5. Clique em **Salvar**.
+5. Marque **Receita/Despesa da atividade empresarial** somente quando aplicável. Empréstimos, aportes e transferências não devem ser classificados como faturamento apenas por pertencerem à empresa. A classificação acompanha o movimento gerado na baixa; títulos históricos não classificados não são reinterpretados automaticamente.
+6. Clique em **Salvar**. Se houver falha de comunicação, mantenha os dados e repita a tentativa sem criar outro título: a tela conserva o identificador para replay. Essa conservação é em memória e não sobrevive ao reload; confira a listagem antes de cadastrar novamente após recarregar.
+
+A criação usa `obligation_creation_operations` para registrar pedido e resultado no mesmo commit do título e da quota. A [migração aditiva](../../scripts/migrate_premium_integrity.sql) deve ser aplicada ao ambiente aprovado antes do deploy. Sem a estrutura, a criação falha explicitamente; não é convertida em sucesso local. Nenhuma migração remota foi executada nesta rodada.
 
 ### 5.3 Como Baixar / Liquidar uma Conta
 - Quando o pagamento for realizado ou o valor cair na conta:

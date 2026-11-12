@@ -1,7 +1,15 @@
 export type MeiObligationStatus = 'pending' | 'scheduled' | 'paid' | 'overdue' | 'cancelled';
 
+/** Competência: month é 1-based. Estimativa sem calendário oficial de feriados.
+ * Datas oficiais/prorrogações já cadastradas devem prevalecer sobre esta regra.
+ */
 export const getObligationDueDate = (year: number, month: number): string => {
-    const date = new Date(year, month, 20, 12);
+    if (!Number.isInteger(year) || year < 1000 || year > 9998 || !Number.isInteger(month) || month < 1 || month > 12) {
+        throw new Error('invalid_mei_competence');
+    }
+    const date = new Date(Date.UTC(year, month, 20));
+    if (date.getUTCDay() === 6) date.setUTCDate(date.getUTCDate() + 2);
+    else if (date.getUTCDay() === 0) date.setUTCDate(date.getUTCDate() + 1);
     return date.toISOString().slice(0, 10);
 };
 
@@ -10,7 +18,8 @@ export const getObligationStatus = ({ status, dueDate, today = new Date() }: {
     dueDate: string;
     today?: Date;
 }): MeiObligationStatus => {
-    if (status === 'pending' && new Date(`${dueDate}T12:00:00`) < today) return 'overdue';
+    const todayDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    if (status === 'pending' && dueDate < todayDate) return 'overdue';
     return status;
 };
 
