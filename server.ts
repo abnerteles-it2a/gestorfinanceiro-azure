@@ -3,6 +3,8 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { getPool } from './api/_db';
+import { ensureSchemaOnce } from './api/bootstrap';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -175,4 +177,9 @@ app.get(/(.*)/, (req, res) => {
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`Server listening on port ${port}`);
+  if (process.env.DATABASE_URL || process.env.NEON_DATABASE_URL) {
+    ensureSchemaOnce(getPool())
+      .then(() => console.log('[Startup] Additive database schema verified.'))
+      .catch((err) => console.warn('[Startup] Schema verification warning:', err?.message));
+  }
 });

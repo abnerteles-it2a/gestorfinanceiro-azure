@@ -32,25 +32,37 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return (
         <ToastContext.Provider value={{ showToast }}>
             {children}
-            <div className="fixed bottom-4 right-4 z-[100] space-y-2">
+            <div role="region" aria-label="Notificações do sistema" aria-live="polite" className="fixed bottom-4 right-4 z-[100] space-y-2 max-w-sm">
                 {toasts.map(toast => (
                     <div 
                         key={toast.id}
+                        role={toast.type === 'error' ? 'alert' : 'status'}
                         className={`
-                            flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg text-white transform transition-all duration-300 ease-in-out
-                            ${toast.type === 'success' ? 'bg-green-600' : toast.type === 'error' ? 'bg-red-600' : toast.type === 'warning' ? 'bg-yellow-600' : 'bg-blue-600'}
+                            flex items-center gap-3 px-4 py-3 rounded-xl shadow-xl text-white transform transition-opacity duration-300 ease-in-out
+                            ${toast.type === 'success' ? 'bg-emerald-600' : toast.type === 'error' ? 'bg-rose-600' : toast.type === 'warning' ? 'bg-amber-600' : 'bg-teal-600'}
                             animate-fade-in-up
                         `}
                     >
-                        <span className="text-sm">{toast.message}</span>
+                        <span className="text-sm flex-1">{toast.message}</span>
                         {toast.actionLabel && toast.onAction && (
                             <button
+                                type="button"
                                 onClick={() => { try { toast.onAction && toast.onAction(); } catch {} setToasts(prev => prev.filter(t => t.id !== toast.id)); }}
-                                className="ml-2 px-2 py-1 rounded bg-white/20 hover:bg-white/30 text-white text-xs"
+                                className="ml-2 px-2.5 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs font-semibold shrink-0"
                             >
                                 {toast.actionLabel}
                             </button>
                         )}
+                        <button
+                            type="button"
+                            aria-label="Fechar notificação"
+                            onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
+                            className="p-1 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors shrink-0"
+                        >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
                     </div>
                 ))}
             </div>

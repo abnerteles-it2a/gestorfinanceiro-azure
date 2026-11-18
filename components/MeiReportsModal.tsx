@@ -23,6 +23,12 @@ export const MeiReportsModal: React.FC<MeiReportsModalProps> = ({ isOpen, onClos
 
     const [obligationsRevision, setObligationsRevision] = useState(0);
     const [mutationPending, setMutationPending] = useState(false);
+    const [feedback, setFeedback] = useState<{ type: 'info' | 'error' | 'success'; text: string } | null>(null);
+
+    const notify = (text: string, type: 'info' | 'error' | 'success' = 'info') => {
+        setFeedback({ type, text });
+        try { if (typeof alert === 'function') alert(text); } catch {}
+    };
 
     React.useEffect(() => {
         if (!isOpen) return;
@@ -68,13 +74,13 @@ export const MeiReportsModal: React.FC<MeiReportsModalProps> = ({ isOpen, onClos
     const handleQuickPay = async (month: number) => {
         const obligation = dasStatus.find(item => item.month === month)?.obligation;
         if (mutationPending || obligationsLoading || obligationsError) return;
-        if (!obligation) { alert('Cadastre a obrigação DAS desta competência antes de registrar o pagamento.'); return; }
-        if (obligation.status === 'paid' || obligation.status === 'cancelled' || !Number.isFinite(Number(obligation.total_amount)) || Number(obligation.total_amount) <= 0) { alert('Informe os valores da guia oficial em uma obrigação aberta antes de pagar.'); return; }
-        if (!confirm(`Confirmar pagamento do DAS desta competência? Será lançado um débito de ${formatCurrency(Number(obligation.total_amount || 0))}.`)) return;
+        if (!obligation) { notify('Cadastre a obrigação DAS desta competência antes de registrar o pagamento.', 'error'); return; }
+        if (obligation.status === 'paid' || obligation.status === 'cancelled' || !Number.isFinite(Number(obligation.total_amount)) || Number(obligation.total_amount) <= 0) { notify('Informe os valores da guia oficial em uma obrigação aberta antes de pagar.', 'error'); return; }
+        if (typeof confirm === 'function' && !confirm(`Confirmar pagamento do DAS desta competência? Será lançado um débito de ${formatCurrency(Number(obligation.total_amount || 0))}.`)) return;
         
         const mainAccount = accounts[0];
         if (!mainAccount) {
-            alert('Cadastre uma conta bancária primeiro.');
+            notify('Cadastre uma conta bancária primeiro.', 'error');
             return;
         }
 
@@ -90,8 +96,9 @@ export const MeiReportsModal: React.FC<MeiReportsModalProps> = ({ isOpen, onClos
             refreshData();
             setObligationsLoading(true);
             setObligationsRevision(value => value + 1);
+            setFeedback({ type: 'success', text: 'Pagamento da obrigação DAS registrado com sucesso.' });
         } catch {
-            alert('Não foi possível registrar o pagamento da obrigação.');
+            notify('Não foi possível registrar o pagamento da obrigação.', 'error');
         } finally {
             setMutationPending(false);
         }
@@ -116,9 +123,9 @@ export const MeiReportsModal: React.FC<MeiReportsModalProps> = ({ isOpen, onClos
             refreshData();
             setObligationsLoading(true);
             setObligationsRevision(value => value + 1);
-            alert('Agendamento registrado na obrigação DAS. Isso não emite guia nem efetua pagamento.');
+            notify('Agendamento registrado na obrigação DAS. Isso não emite guia nem efetua pagamento.', 'info');
         } catch (e) {
-            alert(e instanceof Error && e.message !== 'obligation_schedule_failed' ? e.message : 'Erro ao agendar.');
+            notify(e instanceof Error && e.message !== 'obligation_schedule_failed' ? e.message : 'Erro ao agendar.', 'error');
         } finally {
             setMutationPending(false);
         }
@@ -200,6 +207,22 @@ export const MeiReportsModal: React.FC<MeiReportsModalProps> = ({ isOpen, onClos
     return (
         <Modal isOpen={isOpen} onClose={onClose} title="Relatórios MEI" size="lg" footer={footerContent}>
             <div className="flex flex-col h-[70vh]">
+                {feedback && (
+                    <div
+                        role={feedback.type === 'error' ? 'alert' : 'status'}
+                        aria-live="polite"
+                        className={`mb-3 flex items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-xs font-medium ${
+                            feedback.type === 'error'
+                                ? 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-200'
+                                : feedback.type === 'success'
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800/60 dark:bg-emerald-950/40 dark:text-emerald-200'
+                                : 'border-teal-200 bg-teal-50 text-teal-800 dark:border-teal-800/60 dark:bg-teal-950/40 dark:text-teal-200'
+                        }`}
+                    >
+                        <span>{feedback.text}</span>
+                        <button type="button" aria-label="Fechar aviso" onClick={() => setFeedback(null)} className="text-current opacity-60 hover:opacity-100">✕</button>
+                    </div>
+                )}
                 <div className="flex justify-between items-center mb-4">
                     <div className="flex gap-2 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg overflow-x-auto">
                         <button 

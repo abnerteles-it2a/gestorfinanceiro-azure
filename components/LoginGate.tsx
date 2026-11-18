@@ -135,13 +135,13 @@ export const LoginGate: React.FC<LoginGateProps> = ({ onOpenSettings }) => {
       if (!suOrgName.trim()) { showToast('Nome da organização é obrigatório.', 'error'); setSuMsg('Nome da organização é obrigatório.'); return; }
       if (!Number.isFinite(seatsNum) || seatsNum < 1) { showToast('Número de assentos inválido.', 'error'); setSuMsg('Número de assentos inválido.'); return; }
 
-      const res: any = await signUp(suEmail.trim().toLowerCase(), suPassword, { 
-        name: suName.trim(), 
-        orgName: suOrgName.trim(), 
-        planTier: suPlanTier, 
-        seats: seatsNum, 
+      const res: any = await signUp(suEmail.trim().toLowerCase(), suPassword, {
+        name: suName.trim(),
+        orgName: suOrgName.trim(),
+        planTier: suPlanTier,
+        seats: seatsNum,
         cpfCnpj: suCpfCnpj,
-        businessProfile: suProfile 
+        businessProfile: suProfile
       });
 
       if (res?.requiresVerification) {
@@ -239,78 +239,94 @@ export const LoginGate: React.FC<LoginGateProps> = ({ onOpenSettings }) => {
 
       <div className="fixed inset-0 z-[200] flex min-h-screen w-screen items-center justify-center overflow-y-auto bg-slate-950 py-4 animate-fade-in">
         <div className="w-full max-w-6xl grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-10 px-3 sm:px-5 md:px-8">
-          <div className="hidden md:flex flex-col items-center justify-center rounded-2xl p-10 bg-gray-800/60 backdrop-blur-sm border border-gray-700/50">
+          <div className="hidden md:flex flex-col items-center justify-center rounded-3xl p-10 bg-slate-900/70 backdrop-blur-md border border-slate-800">
             <div className="flex items-center gap-3 mb-3 w-full max-w-md">
               {showLogo && (
-                <img src={logoSrc} alt="Logo" className="h-10 w-auto object-contain" onError={() => { setLogoErr(logoErr + 1); setShowLogo(false); }} />
+                <img src={logoSrc} alt="Gestor Financeiro" width={40} height={40} className="h-10 w-auto object-contain" onError={() => { setLogoErr(logoErr + 1); setShowLogo(false); }} />
               )}
               <div>
                 <div className="text-3xl font-bold text-white tracking-tight">Gestor Financeiro</div>
-                <div className="text-sm text-gray-400 uppercase tracking-widest font-medium">Contábil & Investimentos</div>
+                <div className="text-sm text-slate-400 uppercase tracking-widest font-medium">PF · MEI · PME & Investimentos</div>
               </div>
             </div>
-            <div className="flex items-center gap-2 mt-8 text-gray-500 text-[10px] uppercase font-black tracking-widest bg-gray-900/40 px-3 py-1.5 rounded-full border border-gray-700/30">
-               <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
-               SaaS Gestor v1.2 — Alpha Launch
+            <div className="flex items-center gap-2 mt-8 text-slate-300 text-[10px] uppercase font-black tracking-widest bg-slate-950/60 px-3.5 py-1.5 rounded-full border border-teal-500/30">
+               <span className="h-1.5 w-1.5 rounded-full bg-[#0D9488] animate-pulse" aria-hidden="true"></span>
+               Gestor Financeiro Enterprise · Cloud Suite
             </div>
           </div>
           <div className="flex items-center justify-center p-0">
-            <div className="w-full max-w-lg bg-white rounded-2xl p-5 sm:p-7 md:p-10 shadow-[0_10px_35px_rgba(0,0,0,0.35)] relative border border-gray-200">
-              {busy && <div className="absolute top-0 left-0 h-1 w-full bg-indigo-600 animate-pulse" />}
-              
+            <form
+              onSubmit={(e) => { e.preventDefault(); handleSignIn(); }}
+              className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-7 md:p-10 shadow-2xl relative border border-slate-200 dark:border-slate-800 overflow-hidden"
+            >
+              {busy && <div className="absolute top-0 left-0 h-1 w-full bg-[#0D9488] animate-pulse" />}
+
               <div className="text-center mb-8">
-                <h1 className="text-2xl font-black text-gray-900 mb-2 uppercase tracking-tight">Bem-vindo</h1>
-                <p className="text-gray-500 text-sm font-medium">Gestão inteligente para você e sua empresa</p>
+                <h1 className="text-2xl font-black text-slate-900 dark:text-white mb-2 uppercase tracking-tight">Bem-vindo</h1>
+                <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">Gestão inteligente para você, seu MEI, sua empresa e seus investimentos</p>
               </div>
 
               <div className="space-y-3 mb-6">
-                <input 
-                  value={email} 
-                  onChange={(e) => setEmail(e.target.value)} 
-                  placeholder="E-mail" 
-                  disabled={busy} 
-                  className="w-full px-4 py-3 rounded-xl text-sm border border-gray-200 bg-gray-50 text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none" 
-                />
+                <div>
+                  <label htmlFor="login-email" className="sr-only">E-mail</label>
+                  <input
+                    id="login-email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    spellCheck={false}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="E-mail corporativo ou pessoal…"
+                    disabled={busy}
+                    className="w-full px-4 py-3 rounded-xl text-sm border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-slate-900 dark:text-white focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] transition-colors outline-none"
+                  />
+                </div>
                 <div className="relative">
-                  <input 
-                    value={password} 
-                    onChange={(e) => setPassword(e.target.value)} 
-                    type={showLoginPassword ? 'text' : 'password'} 
-                    placeholder="Senha" 
-                    disabled={busy} 
-                    className="w-full px-4 py-3 rounded-xl text-sm border border-gray-200 bg-gray-50 text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none pr-12" 
+                  <label htmlFor="login-password" className="sr-only">Senha</label>
+                  <input
+                    id="login-password"
+                    name="password"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    type={showLoginPassword ? 'text' : 'password'}
+                    placeholder="Sua senha…"
+                    disabled={busy}
+                    className="w-full px-4 py-3 rounded-xl text-sm border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-slate-900 dark:text-white focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] transition-colors outline-none pr-16"
                   />
                   <button
                     type="button"
                     onClick={() => setShowLoginPassword(v => !v)}
                     disabled={busy}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-indigo-600"
+                    aria-label={showLoginPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-[#0D9488]"
                   >
                     {showLoginPassword ? 'Ocultar' : 'Mostrar'}
                   </button>
                 </div>
                 <div className="flex justify-end">
-                  <button onClick={() => setIsForgotOpen(true)} className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest hover:underline">Esqueci minha senha</button>
+                  <button type="button" onClick={() => setIsForgotOpen(true)} className="text-[10px] font-bold text-[#0D9488] uppercase tracking-widest hover:underline">Esqueci minha senha</button>
                 </div>
               </div>
 
-              {msg && <div className="text-[11px] font-bold text-rose-600 mb-4 bg-rose-50 p-2 rounded-lg border border-rose-100">{msg}</div>}
+              {msg && <div role="alert" className="text-[11px] font-bold text-rose-600 dark:text-rose-400 mb-4 bg-rose-50 dark:bg-rose-950/40 p-3 rounded-xl border border-rose-200 dark:border-rose-800/50">{msg}</div>}
 
               <div className="grid grid-cols-2 gap-3">
-                <button onClick={handleSignIn} disabled={busy} className="py-3 rounded-xl text-sm font-black uppercase tracking-widest bg-indigo-600 text-white hover:bg-indigo-700 shadow-md shadow-indigo-200 transition-all disabled:opacity-50">
-                  {busy ? 'Entrando' : 'Entrar'}
+                <button type="submit" disabled={busy} className="py-3 rounded-xl text-sm font-black uppercase tracking-widest bg-[#0D9488] text-white hover:bg-[#0F766E] shadow-md shadow-teal-500/20 transition-colors disabled:opacity-50">
+                  {busy ? 'Entrando…' : 'Entrar'}
                 </button>
-                <button onClick={() => { setSuEmail(email); setSuPassword(password); setIsSignUpOpen(true); }} disabled={busy} className="py-3 rounded-xl text-sm font-black uppercase tracking-widest bg-emerald-600 text-white hover:bg-emerald-700 shadow-md shadow-emerald-200 transition-all disabled:opacity-50">
+                <button type="button" onClick={() => { setSuEmail(email); setSuPassword(password); setIsSignUpOpen(true); }} disabled={busy} className="py-3 rounded-xl text-sm font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-white border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50">
                   Criar Conta
                 </button>
               </div>
 
               {takeoverNeeded && (
-                <button onClick={handleTakeoverSignIn} disabled={busy} className="mt-4 w-full py-3 rounded-xl text-sm font-black uppercase tracking-widest bg-amber-500 text-white hover:bg-amber-600 shadow-md shadow-amber-200 transition-all disabled:opacity-50">
+                <button type="button" onClick={handleTakeoverSignIn} disabled={busy} className="mt-4 w-full py-3 rounded-xl text-sm font-black uppercase tracking-widest bg-amber-500 text-white hover:bg-amber-600 shadow-md transition-colors disabled:opacity-50">
                   Assumir Sessão Atual
                 </button>
               )}
-            </div>
+            </form>
           </div>
         </div>
       </div>
@@ -343,7 +359,7 @@ export const LoginGate: React.FC<LoginGateProps> = ({ onOpenSettings }) => {
                       <input value={suOrgName} onChange={(e) => setSuOrgName(e.target.value)} placeholder="Ex: Minha Empresa ou Finanças Pessoais" disabled={busy} className="w-full px-4 py-2.5 rounded-xl text-sm border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 transition-all outline-none" />
                     </div>
                 </div>
-    
+
                 <div className="space-y-4">
                     <div>
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Seu Melhor E-mail</label>
@@ -382,7 +398,7 @@ export const LoginGate: React.FC<LoginGateProps> = ({ onOpenSettings }) => {
           </div>
 
           {suMsg && <div className="text-[11px] font-bold text-rose-600 bg-rose-50 dark:bg-rose-950/30 p-3 rounded-xl border border-rose-100 dark:border-rose-900/40">{suMsg}</div>}
-          
+
           <div className="text-center text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-widest font-medium">
              Ao criar uma conta, você aceita nossos termos de uso e política de privacidade.
           </div>
@@ -391,11 +407,11 @@ export const LoginGate: React.FC<LoginGateProps> = ({ onOpenSettings }) => {
       <Modal isOpen={isVerifyOpen} onClose={() => setIsVerifyOpen(false)} title="Verificação de E-mail" size="md" zIndex={1100}>
         <div className="space-y-6 py-2 text-center">
           <p className="text-sm text-gray-600 dark:text-gray-400">Enviamos um código de 6 dígitos para <strong>{verifyEmailAddr}</strong>. Digite-o abaixo para validar sua conta.</p>
-          <input 
-            value={verifyCode} 
-            onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6))} 
-            placeholder="000000" 
-            className="w-full text-center text-3xl font-black tracking-[0.5em] py-4 rounded-2xl border-2 border-indigo-100 dark:border-indigo-900 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:ring-0 transition-all outline-none" 
+          <input
+            value={verifyCode}
+            onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            placeholder="000000"
+            className="w-full text-center text-3xl font-black tracking-[0.5em] py-4 rounded-2xl border-2 border-indigo-100 dark:border-indigo-900 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:ring-0 transition-all outline-none"
           />
           <button onClick={handleVerifySubmit} disabled={busy || verifyCode.length < 6} className="w-full py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest bg-indigo-600 text-white hover:bg-indigo-700 shadow-xl shadow-indigo-200 dark:shadow-none transition-all disabled:opacity-50">
             {busy ? 'Verificando...' : 'Verificar E-mail'}
@@ -410,11 +426,11 @@ export const LoginGate: React.FC<LoginGateProps> = ({ onOpenSettings }) => {
       <Modal isOpen={isForgotOpen} onClose={() => setIsForgotOpen(false)} title="Recuperar Senha" size="md" zIndex={1100}>
         <div className="space-y-6 py-2">
           <p className="text-sm text-gray-600 dark:text-gray-400 text-center">Digite seu e-mail para receber um link de recuperação de senha.</p>
-          <input 
-            value={forgotEmail} 
-            onChange={(e) => setForgotEmail(e.target.value)} 
-            placeholder="seu@email.com" 
-            className="w-full px-4 py-3 rounded-xl text-sm border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 transition-all outline-none" 
+          <input
+            value={forgotEmail}
+            onChange={(e) => setForgotEmail(e.target.value)}
+            placeholder="seu@email.com"
+            className="w-full px-4 py-3 rounded-xl text-sm border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
           />
           <button onClick={handleForgotSubmit} disabled={busy || !forgotEmail.includes('@')} className="w-full py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest bg-indigo-600 text-white hover:bg-indigo-700 shadow-xl shadow-indigo-200 dark:shadow-none transition-all disabled:opacity-50">
             {busy ? 'Enviando...' : 'Enviar Link de Recuperação'}
@@ -426,12 +442,12 @@ export const LoginGate: React.FC<LoginGateProps> = ({ onOpenSettings }) => {
         <div className="space-y-6 py-2">
           <p className="text-sm text-gray-600 dark:text-gray-400 text-center">Digite sua nova senha abaixo.</p>
           <div className="space-y-4">
-            <input 
-              value={resetPasswordVal} 
-              onChange={(e) => setResetPasswordVal(e.target.value)} 
+            <input
+              value={resetPasswordVal}
+              onChange={(e) => setResetPasswordVal(e.target.value)}
               type="password"
-              placeholder="Nova Senha" 
-              className="w-full px-4 py-3 rounded-xl text-sm border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 transition-all outline-none" 
+              placeholder="Nova Senha"
+              className="w-full px-4 py-3 rounded-xl text-sm border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
             />
           </div>
           <button onClick={handleResetSubmit} disabled={busy || resetPasswordVal.length < 6} className="w-full py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest bg-indigo-600 text-white hover:bg-indigo-700 shadow-xl shadow-indigo-200 dark:shadow-none transition-all disabled:opacity-50">

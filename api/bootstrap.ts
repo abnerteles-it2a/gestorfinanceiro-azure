@@ -6,7 +6,7 @@ import { financialSnapshot, financialTransactions, listTransactions, resolveFina
 
 let isSchemaEnsured = false;
 
-async function ensureSchemaOnce(db: Pool) {
+export async function ensureSchemaOnce(db: Pool) {
   if (isSchemaEnsured) return;
   isSchemaEnsured = true;
   try {
@@ -106,10 +106,21 @@ async function ensureSchemaOnce(db: Pool) {
     }
     
     await db.query(`create table if not exists public.obligation_settlements (operation_id uuid primary key, obligation_id uuid not null, kind text not null check (kind in ('payable','receivable')), principal_amount numeric(14,2) not null, cash_amount numeric(14,2) not null, account_id uuid not null, transaction_id uuid not null unique, created_at timestamptz not null default now())`);
+    await db.query(`create table if not exists public.obligation_creation_operations (scope_type text not null check (scope_type in ('personal','org')), scope_id uuid not null, operation_id uuid not null, user_id uuid not null, request_payload jsonb not null, result_payload jsonb not null, created_at timestamptz not null default now(), primary key (scope_type, scope_id, operation_id))`);
+    await db.query(`create table if not exists public.billing_payments (payment_id text primary key, sequence_id bigserial unique not null, scope_key text not null, user_id uuid not null, org_id uuid, tier text not null check (tier in ('starter', 'plus', 'pro')), billing_period text not null check (billing_period in ('monthly', 'yearly')), state text not null default 'pending' check (state in ('pending', 'overdue', 'failed', 'applied', 'superseded')), created_at timestamptz not null default now(), applied_at timestamptz)`);
+    try { await db.query(`create index if not exists billing_payments_scope_sequence_idx on public.billing_payments (scope_key, sequence_id)`); } catch {}
     for (const [table,column] of [['payables','paid_amount'],['receivables','received_amount']]) {
       await db.query(`alter table public.${table} add column if not exists ${column} numeric(14,2) default 0`);
       await db.query(`alter table public.${table} add column if not exists transaction_id uuid`);
       await db.query(`alter table public.${table} add column if not exists updated_at timestamptz default now()`);
+      await db.query(`alter table public.${table} add column if not exists is_business_revenue boolean not null default false`);
+      await db.query(`alter table public.${table} add column if not exists is_business_expense boolean not null default false`);
+      await db.query(`alter table public.${table} add column if not exists issue_date date`);
+    }
+    try { await db.query(`alter table public.payables add column if not exists supplier text`); } catch {}
+    try { await db.query(`alter table public.receivables add column if not exists customer text`); } catch {}
+    for (const pendingCol of ['pending_payment_id text', 'pending_billing_period text', 'pending_requested_tier text', 'pending_period_start timestamptz', 'pending_period_end timestamptz']) {
+      try { await db.query(`alter table public.org_subscriptions add column if not exists ${pendingCol}`); } catch {}
     }
     await db.query(`create table if not exists public.organizations (id uuid primary key, name text, seats int, plan_id uuid, created_at timestamptz default now())`);
     await db.query(`create table if not exists public.plans (id uuid primary key, name text, tier text, created_at timestamptz default now())`);

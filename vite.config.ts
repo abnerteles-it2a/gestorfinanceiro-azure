@@ -24,9 +24,14 @@ export default defineConfig(({ mode }) => {
         chunkSizeWarningLimit: 1000,
         rollupOptions: {
           output: {
-            manualChunks: {
-              'react-vendor': ['react', 'react-dom'],
-              'charts': ['recharts']
+            manualChunks(id) {
+              const norm = id.replace(/\\/g, '/');
+              if (norm.includes('node_modules/react/') || norm.includes('node_modules/react-dom/') || norm.includes('node_modules/scheduler/')) {
+                return 'react-vendor';
+              }
+              if (norm.includes('node_modules/recharts') || norm.includes('node_modules/d3-') || norm.includes('node_modules/victory-vendor')) {
+                return 'charts';
+              }
             }
           }
         }

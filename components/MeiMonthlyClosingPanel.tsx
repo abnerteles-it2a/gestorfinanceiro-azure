@@ -40,15 +40,22 @@ export const MeiMonthlyClosingPanel: React.FC = () => {
 
     useEffect(() => { load(); }, [load]);
 
-    const runAction = async (type: string) => {
+    const [pendingAction, setPendingAction] = useState<'mei_monthly_closing_review' | 'mei_monthly_closing_close' | 'mei_monthly_closing_reopen' | null>(null);
+    const [reopenReason, setReopenReason] = useState('');
+
+    const executeAction = async (type: string, notes?: string) => {
         if (!data?.snapshot || actionBusy) return;
-        const notes = type === 'mei_monthly_closing_reopen' ? window.prompt('Informe o motivo da reabertura:') : undefined;
-        if (type === 'mei_monthly_closing_reopen' && !notes) return;
-        if (!window.confirm(type === 'mei_monthly_closing_close' ? 'Fechar esta competência?' : type === 'mei_monthly_closing_review' ? 'Marcar esta competência como revisada?' : 'Reabrir esta competência?')) return;
+        if (type === 'mei_monthly_closing_reopen' && !notes?.trim()) {
+            setError('Informe o motivo da reabertura da competência.');
+            return;
+        }
         setActionBusy(true);
+        setError('');
         try {
-            const response = await fetch('/api/query', { method: 'POST', headers: headers(), body: JSON.stringify({ type, data: { year, month, snapshot: data.snapshot, notes } }) });
+            const response = await fetch('/api/query', { method: 'POST', headers: headers(), body: JSON.stringify({ type, data: { year, month, snapshot: data.snapshot, notes: notes?.trim() || undefined } }) });
             if (!response.ok) throw new Error('A ação não pôde ser concluída.');
+            setPendingAction(null);
+            setReopenReason('');
             await load();
         } catch (err: any) {
             setError(err?.message || 'A ação não pôde ser concluída.');
@@ -98,12 +105,54 @@ export const MeiMonthlyClosingPanel: React.FC = () => {
                     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60">
                         <div className="text-xs text-slate-600 dark:text-slate-300"><strong>Status:</strong> {status} · <strong>DAS:</strong> {snapshot.das ? `${snapshot.das.status} · ${snapshot.das.totalAmount > 0 ? formatCurrency(snapshot.das.totalAmount) : 'valor não informado'}` : 'não gerado'}</div>
                         <div className="flex flex-wrap gap-2">
-                            <button onClick={exportCsv} className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white dark:border-slate-600 dark:text-slate-200">Exportar CSV</button>
-                            {status === 'open' && <button disabled={actionBusy} onClick={() => runAction('mei_monthly_closing_review')} className="min-h-11 rounded-lg bg-teal-700 px-3 py-2 text-xs font-semibold text-white hover:bg-teal-800 disabled:opacity-50">Marcar revisado</button>}
-                            {status === 'reviewed' && <button disabled={actionBusy} onClick={() => runAction('mei_monthly_closing_close')} className="min-h-11 rounded-lg bg-teal-700 px-3 py-2 text-xs font-semibold text-white hover:bg-teal-800 disabled:opacity-50">Fechar competência</button>}
-                            {status === 'closed' && <button disabled={actionBusy} onClick={() => runAction('mei_monthly_closing_reopen')} className="min-h-11 rounded-lg border border-amber-500 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50">Reabrir</button>}
+                            <button type="button" onClick={exportCsv} className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">Exportar CSV</button>
+                            {status === 'open' && <button type="button" disabled={actionBusy} onClick={() => setPendingAction('mei_monthly_closing_review')} className="min-h-11 rounded-lg bg-teal-700 px-3 py-2 text-xs font-semibold text-white hover:bg-teal-800 disabled:opacity-50">Marcar revisado</button>}
+                            {status === 'reviewed' && <button type="button" disabled={actionBusy} onClick={() => setPendingAction('mei_monthly_closing_close')} className="min-h-11 rounded-lg bg-teal-700 px-3 py-2 text-xs font-semibold text-white hover:bg-teal-800 disabled:opacity-50">Fechar competência</button>}
+                            {status === 'closed' && <button type="button" disabled={actionBusy} onClick={() => setPendingAction('mei_monthly_closing_reopen')} className="min-h-11 rounded-lg border border-amber-500 px-3 py-2 text-xs font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30 disabled:opacity-50">Reabrir</button>}
                         </div>
                     </div>
+                    {pendingAction && (
+                        <div role="region" aria-label="Confirmação de ação da competência" className="rounded-xl border border-teal-500/30 bg-teal-50/60 dark:bg-slate-800/80 p-4 space-y-3 animate-fade-in">
+                            <p className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                                {pendingAction === 'mei_monthly_closing_close'
+                                    ? 'Confirmar o fechamento formal desta competência?'
+                                    : pendingAction === 'mei_monthly_closing_review'
+                                    ? 'Confirmar que os lançamentos desta competência foram revisados?'
+                                    : 'Informe o motivo para reabrir esta competência fechada:'}
+                            </p>
+                            {pendingAction === 'mei_monthly_closing_reopen' && (
+                                <div>
+                                    <label htmlFor="mei-reopen-reason" className="sr-only">Motivo da reabertura</label>
+                                    <input
+                                        id="mei-reopen-reason"
+                                        type="text"
+                                        value={reopenReason}
+                                        onChange={e => setReopenReason(e.target.value)}
+                                        placeholder="Ex: Ajuste de nota fiscal complementar emitida no período…"
+                                        className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
+                                    />
+                                </div>
+                            )}
+                            <div className="flex items-center justify-end gap-2">
+                                <button
+                                    type="button"
+                                    disabled={actionBusy}
+                                    onClick={() => { setPendingAction(null); setReopenReason(''); }}
+                                    className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={actionBusy || (pendingAction === 'mei_monthly_closing_reopen' && !reopenReason.trim())}
+                                    onClick={() => executeAction(pendingAction, reopenReason)}
+                                    className="rounded-lg bg-teal-700 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
+                                >
+                                    {actionBusy ? 'Processando…' : 'Confirmar'}
+                                </button>
+                            </div>
+                        </div>
+                    )}
                     {snapshot.warnings?.length > 0 && <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800">{snapshot.warnings.map((warning: string) => <p key={warning}>• {warning}</p>)}</div>}
                     <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
                         <table className="min-w-full text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase tracking-widest text-slate-500 dark:bg-slate-800"><tr><th className="px-4 py-3">Data</th><th className="px-4 py-3">Descrição</th><th className="px-4 py-3">Categoria</th><th className="px-4 py-3">Tipo</th><th className="px-4 py-3 text-right">Valor</th></tr></thead><tbody className="divide-y divide-slate-100 dark:divide-slate-800">{snapshot.entries?.length ? snapshot.entries.map((entry: any) => <tr key={entry.id}><td className="whitespace-nowrap px-4 py-3 tabular-nums">{formatDate(String(entry.date).slice(0, 10))}</td><td className="px-4 py-3">{entry.description || 'Sem descrição'}</td><td className="px-4 py-3">{entry.category}</td><td className="px-4 py-3">{entry.transactionType}</td><td className="px-4 py-3 text-right font-semibold tabular-nums">{formatCurrency(entry.amount)}</td></tr>) : <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">Nenhum lançamento empresarial nesta competência.</td></tr>}</tbody></table>

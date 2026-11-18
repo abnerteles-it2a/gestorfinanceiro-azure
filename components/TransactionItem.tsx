@@ -12,21 +12,23 @@ export const TransactionItem: React.FC<{ transaction: Transaction, categoryIcon?
     const isTransfer = transaction.transactionType === TransactionType.TRANSFER;
 
     return (
-        <div className="flex items-center justify-between py-3 px-1 border-b border-gray-200 dark:border-gray-700 last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors rounded-md">
-            <div className="flex items-center">
-                 <div className={`p-2 rounded-full mr-3 flex items-center justify-center w-10 h-10 ${isIncome ? 'bg-green-100 dark:bg-green-900/30 text-green-600' : 'bg-red-100 dark:bg-red-900/30 text-red-600'}`}>
-                    {categoryIcon ? <span className="text-lg leading-none">{categoryIcon}</span> : (isIncome ? <ArrowUpIcon className="h-5 w-5" /> : <ArrowDownIcon className="h-5 w-5" />)}
+        <div className="flex items-center justify-between py-3 px-2 border-b border-slate-100 dark:border-slate-800/60 last:border-b-0 hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors rounded-xl">
+            <div className="flex items-center min-w-0 pr-2">
+                 <div className={`p-2 rounded-xl mr-3 flex items-center justify-center w-9 h-9 shrink-0 ${isIncome ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'}`}>
+                    {categoryIcon ? <span className="text-base leading-none">{categoryIcon}</span> : (isIncome ? <ArrowUpIcon className="h-4 w-4" aria-hidden="true" /> : <ArrowDownIcon className="h-4 w-4" aria-hidden="true" />)}
                 </div>
-                <div>
-                    <p className="font-medium text-gray-900 dark:text-white">{transaction.description}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{account?.name} • {transaction.category}</p>
+                <div className="min-w-0">
+                    <p className="font-semibold text-xs sm:text-sm text-slate-900 dark:text-white truncate">{transaction.description}</p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{account?.name} • {transaction.category}</p>
                 </div>
             </div>
-            <div className="text-right">
+            <div className="text-right shrink-0">
                 <StatusTag type={isIncome ? 'success' : isTransfer ? 'info' : 'error'}>
-                    {isPrivacyMode ? '••••' : `${isIncome ? '+' : isTransfer ? '' : '-'} ${formatCurrency(transaction.amount)}`}
+                    <span className="tabular-nums font-bold">
+                        {isPrivacyMode ? '••••' : `${isIncome ? '+' : isTransfer ? '' : '-'} ${formatCurrency(transaction.amount)}`}
+                    </span>
                 </StatusTag>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{formatDate(transaction.date)}</p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 tabular-nums">{formatDate(transaction.date)}</p>
             </div>
         </div>
     );

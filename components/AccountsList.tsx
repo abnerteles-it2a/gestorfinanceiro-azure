@@ -7,20 +7,20 @@ import { BankAccount } from '../types';
 export const AccountsList: React.FC<{ accounts: BankAccount[] }> = ({ accounts }) => {
     const { isPrivacyMode } = useFinancialData();
     return (
-        <div className="bg-white dark:bg-gray-800 p-4 lg:p-4 xl:p-6 rounded-lg shadow-lg h-[15rem] md:h-[17.5rem] flex flex-col">
-            <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Contas Bancárias</h3>
+        <div className="bg-white/40 dark:bg-slate-900/40 p-5 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800 h-[15rem] md:h-[17.5rem] flex flex-col backdrop-blur-sm">
+            <h3 className="text-label-caps !text-slate-400 mb-4">Contas Bancárias</h3>
             <div className="space-y-3 flex-1 overflow-y-auto pr-1 custom-scrollbar">
                 {accounts.map(account => (
-                    <div key={account.id} className="flex items-center justify-between p-3 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700/50 group transition-all hover:scale-[1.01]">
+                    <div key={account.id} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-100/70 dark:hover:bg-slate-800/50 group transition-colors">
                         <div className="flex items-center">
-                            <WalletIcon className="h-6 w-6 text-indigo-500 dark:text-indigo-400 mr-3" />
+                            <WalletIcon className="h-5 w-5 text-[#0D9488] mr-3" aria-hidden="true" />
                             <div>
-                                <p className="font-medium text-gray-900 dark:text-white">{account.name}</p>
-                                <p className="text-xs text-gray-500 dark:text-gray-400">{account.bank}</p>
+                                <p className="font-semibold text-sm text-slate-900 dark:text-white">{account.name}</p>
+                                <p className="text-xs text-slate-500 dark:text-slate-400">{account.bank}</p>
                             </div>
                         </div>
                         <div className="flex items-center">
-                            <p className="font-semibold text-gray-900 dark:text-white mr-4">
+                            <p className="font-bold text-sm text-slate-900 dark:text-white tabular-nums">
                                 {isPrivacyMode ? '••••' : formatCurrency(account.balance ?? 0)}
                             </p>
                         </div>

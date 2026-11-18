@@ -29,6 +29,10 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         try { body.setAttribute('data-theme', theme); } catch {}
         (root.style as any).colorScheme = theme;
         (body.style as any).colorScheme = theme;
+        const metaTheme = window.document.querySelector('meta[name="theme-color"]');
+        if (metaTheme) {
+            metaTheme.setAttribute('content', theme === 'dark' ? '#020617' : '#E9EDF0');
+        }
         localStorage.setItem('theme', theme);
     }, [theme]);
     

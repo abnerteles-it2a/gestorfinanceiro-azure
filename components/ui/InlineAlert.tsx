@@ -58,8 +58,8 @@ export const InlineAlert: React.FC<InlineAlertProps> = ({
         : `${baseClass} w-full`;
 
     return (
-        <div className={layoutClass}>
-            <div className="flex-shrink-0 mr-3">
+        <div role={type === 'error' ? 'alert' : 'status'} aria-live="polite" className={layoutClass}>
+            <div className="flex-shrink-0 mr-3" aria-hidden="true">
                 {icons[type]}
             </div>
             <div className="flex-1 mt-0.5">
@@ -74,13 +74,15 @@ export const InlineAlert: React.FC<InlineAlertProps> = ({
             </div>
             {isToast && (
                 <button 
+                    type="button"
+                    aria-label="Fechar alerta"
                     onClick={() => {
                         setIsVisible(false);
                         if (onClose) onClose();
                     }}
                     className="ml-auto flex-shrink-0 text-current opacity-50 hover:opacity-100 transition-opacity p-1"
                 >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                 </button>

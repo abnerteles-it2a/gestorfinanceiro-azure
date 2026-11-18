@@ -23,6 +23,7 @@ import { CategoryBudgetsWidget } from './CategoryBudgetsWidget';
 import { AccountBalancesWidget } from './AccountBalancesWidget';
 import { RecentTransactionsWidget } from './RecentTransactionsWidget';
 import { PredictiveInsightsWidget } from './PredictiveInsightsWidget';
+import { DailyExecutiveBriefing } from './DailyExecutiveBriefing';
 
 const Dashboard: React.FC = () => {
     const { totalBalance, netWorth, financialTransactions: transactions, accounts, categories, isPrivacyMode, investments, planInfo, organizationInfo, isMei, capabilities, viewMode } = useFinancialData();
@@ -264,7 +265,11 @@ const Dashboard: React.FC = () => {
                 </div>
             </div>
 
-            {/* Predictive AI Insights Card */}
+            {/* Daily Executive Briefing + Predictive AI Insights */}
+            <DailyExecutiveBriefing
+                openPayablesAmount={mbSummary?.openPayables || 0}
+                openReceivablesAmount={mbSummary?.openReceivables || 0}
+            />
             <PredictiveInsightsWidget />
 
             {/* Section: Overview Principal */}

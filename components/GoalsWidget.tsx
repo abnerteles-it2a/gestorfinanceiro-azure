@@ -90,19 +90,21 @@ export const GoalsWidget: React.FC = () => {
 
     return (
         <>
-        <div className="bg-white dark:bg-gray-800 p-4 lg:p-4 xl:p-6 rounded-lg shadow-lg h-[15rem] md:h-[17.5rem] flex flex-col">
+        <div className="bg-white/40 dark:bg-slate-900/40 p-5 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800 h-[15rem] md:h-[17.5rem] flex flex-col backdrop-blur-sm">
             <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center">
-                    <TargetIcon className="h-6 w-6 text-indigo-500 dark:text-indigo-400 mr-3" />
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Metas Financeiras</h3>
+                    <TargetIcon className="h-5 w-5 text-[#0D9488] mr-2.5" aria-hidden="true" />
+                    <h3 className="text-label-caps !text-slate-400">Metas Financeiras</h3>
                 </div>
                 {!isAdding && (
                     <button 
+                        type="button"
+                        aria-label="Adicionar nova meta"
                         onClick={() => setIsAdding(true)} 
-                        className="p-1.5 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-full hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition-colors"
+                        className="p-1.5 bg-[#0D9488]/10 text-[#0D9488] rounded-full hover:bg-[#0D9488]/20 transition-colors"
                         title="Nova Meta"
                     >
-                        <PlusIcon className="h-5 w-5" />
+                        <PlusIcon className="h-4 w-4" aria-hidden="true" />
                     </button>
                 )}
             </div>

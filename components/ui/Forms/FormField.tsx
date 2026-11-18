@@ -29,7 +29,7 @@ export const FormField: React.FC<FormFieldProps> = ({
       {children}
       
       {error && (
-        <p className="text-[11px] font-bold text-rose-500 mt-0.5 animate-in slide-in-from-top-1 opacity-0 fade-in duration-200 fill-mode-forwards">
+        <p role="alert" className="text-[11px] font-bold text-rose-500 dark:text-rose-400 mt-0.5 animate-fade-in">
           {error}
         </p>
       )}

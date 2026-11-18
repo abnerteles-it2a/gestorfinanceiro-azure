@@ -2,11 +2,12 @@ import React, { useEffect, useState } from 'react';
 
 export const WeatherWidget: React.FC<{ isHome?: boolean }> = ({ isHome }) => {
     const [temp, setTemp] = useState<number | null>(null);
-    const [city, setCity] = useState<string>('São José do Rio Preto');
+    const [city, setCity] = useState<string>('São Paulo');
     const env: any = (import.meta as any)?.env || {};
     const isDev = !!env?.DEV;
 
     useEffect(() => {
+        const DEFAULT_CITY = { lat: -23.5505, lon: -46.6333, name: 'São Paulo' };
         const fetchWeather = async (lat: number, lon: number, name?: string) => {
             try {
                 const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`;
@@ -25,12 +26,6 @@ export const WeatherWidget: React.FC<{ isHome?: boolean }> = ({ isHome }) => {
                     const cache = JSON.parse(cacheRaw);
                     const age = Date.now() - (cache.ts || 0);
                     if (age < 1000 * 60 * 60 * 48 && typeof cache.lat === 'number' && typeof cache.lon === 'number') {
-                        const srp = { lat: -20.811, lon: -49.376, name: 'São José do Rio Preto' };
-                        const d = distanceKm(cache.lat, cache.lon, srp.lat, srp.lon);
-                        if (d <= 25 || /bady\s*bassitt/i.test(String(cache.city || ''))) {
-                            fetchWeather(srp.lat, srp.lon, srp.name);
-                            return true;
-                        }
                         const refined = await reverseGeocode(cache.lat, cache.lon);
                         fetchWeather(cache.lat, cache.lon, refined || cache.city || 'Minha Localização');
                         return true;
@@ -44,12 +39,6 @@ export const WeatherWidget: React.FC<{ isHome?: boolean }> = ({ isHome }) => {
                 const c = j?.city || 'Minha Localização';
                 if (!isNaN(lat) && !isNaN(lon)) {
                     try { window.localStorage.setItem('gestor_financeiro_ip_cache', JSON.stringify({ lat, lon, city: c, ts: Date.now() })); } catch {}
-                    const srp = { lat: -20.811, lon: -49.376, name: 'São José do Rio Preto' };
-                    const d = distanceKm(lat, lon, srp.lat, srp.lon);
-                    if (d <= 25 || /bady\s*bassitt/i.test(String(c))) {
-                        fetchWeather(srp.lat, srp.lon, srp.name);
-                        return true;
-                    }
                     const refined = await reverseGeocode(lat, lon);
                     fetchWeather(lat, lon, refined || c);
                     return true;
@@ -95,7 +84,7 @@ export const WeatherWidget: React.FC<{ isHome?: boolean }> = ({ isHome }) => {
                 if (raw) {
                     const pref = JSON.parse(raw);
                     if (pref?.mode === 'auto') {
-                        ipLocate().then((ok)=>{ if (!ok) fetchWeather(-20.811, -49.376, 'São José do Rio Preto'); });
+                        ipLocate().then((ok)=>{ if (!ok) fetchWeather(DEFAULT_CITY.lat, DEFAULT_CITY.lon, DEFAULT_CITY.name); });
                         return;
                     }
                     if (pref?.mode === 'fixed' && typeof pref.lat === 'number' && typeof pref.lon === 'number') {
@@ -108,7 +97,7 @@ export const WeatherWidget: React.FC<{ isHome?: boolean }> = ({ isHome }) => {
                                 const { latitude, longitude } = pos.coords;
                                 fetchWeather(latitude, longitude, 'Minha Localização');
                             },
-                            () => { fetchWeather(-20.811, -49.376, 'São José do Rio Preto'); },
+                            () => { fetchWeather(DEFAULT_CITY.lat, DEFAULT_CITY.lon, DEFAULT_CITY.name); },
                             { timeout: 5000 }
                         );
                         return;
@@ -116,13 +105,13 @@ export const WeatherWidget: React.FC<{ isHome?: boolean }> = ({ isHome }) => {
                     if (pref?.mode === 'fixed' && pref?.name) {
                         geocode(pref.name).then((g) => {
                             if (g) fetchWeather(g.lat, g.lon, g.name || pref.name);
-                            else fetchWeather(-20.811, -49.376, pref.name);
+                            else fetchWeather(DEFAULT_CITY.lat, DEFAULT_CITY.lon, pref.name);
                         });
                         return;
                     }
                 }
             } catch {}
-            ipLocate().then((ok)=>{ if (!ok) fetchWeather(-20.811, -49.376, 'São José do Rio Preto'); });
+            ipLocate().then((ok)=>{ if (!ok) fetchWeather(DEFAULT_CITY.lat, DEFAULT_CITY.lon, DEFAULT_CITY.name); });
         };
         loadWeatherPref();
         const handler = () => loadWeatherPref();

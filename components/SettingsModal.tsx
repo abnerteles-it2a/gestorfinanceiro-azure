@@ -116,7 +116,7 @@ const CategoryRow: React.FC<{ category: Category, onUpdate: (id: string, data: P
                         </div>
                     )}
                 </div>
-                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all translate-x-2 group-hover:translate-x-0">
+                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-all translate-x-2 group-hover:translate-x-0 focus-within:translate-x-0">
                     {isEditing ? (
                         <button onClick={handleSave} className="p-2 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-xl transition-colors"><CheckCircleIcon className="h-4 w-4" /></button>
                     ) : (

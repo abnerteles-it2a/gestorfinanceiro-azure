@@ -12,27 +12,32 @@ export const RecentTransactionsWidget: React.FC<RecentTransactionsWidgetProps> =
     const [txFilter, setTxFilter] = useState<'all' | 'income' | 'expense'>('all');
 
     return (
-        <div className="bg-white dark:bg-gray-800 p-4 lg:p-4 xl:p-6 rounded-lg shadow-lg h-[15rem] md:h-[17.5rem] flex flex-col">
-            <h3 className="text-lg font-semibold mb-3 text-gray-900 dark:text-white">Lançamentos Recentes</h3>
-            <div className="flex items-center gap-2 mb-2">
-                <button
-                    className={`text-xs px-2 py-1 rounded ${txFilter === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white'}`}
-                    onClick={() => setTxFilter('all')}
-                >
-                    Todos
-                </button>
-                <button
-                    className={`text-xs px-2 py-1 rounded ${txFilter === 'income' ? 'bg-green-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white'}`}
-                    onClick={() => setTxFilter('income')}
-                >
-                    Entradas
-                </button>
-                <button
-                    className={`text-xs px-2 py-1 rounded ${txFilter === 'expense' ? 'bg-red-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white'}`}
-                    onClick={() => setTxFilter('expense')}
-                >
-                    Saídas
-                </button>
+        <div className="bg-white/40 dark:bg-slate-900/40 p-5 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800 h-[15rem] md:h-[17.5rem] flex flex-col backdrop-blur-sm">
+            <div className="flex items-center justify-between mb-3">
+                <h3 className="text-label-caps !text-slate-400">Lançamentos Recentes</h3>
+                <div className="flex items-center gap-1.5">
+                    <button
+                        type="button"
+                        className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg transition-colors ${txFilter === 'all' ? 'bg-[#0D9488] text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'}`}
+                        onClick={() => setTxFilter('all')}
+                    >
+                        Todos
+                    </button>
+                    <button
+                        type="button"
+                        className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg transition-colors ${txFilter === 'income' ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'}`}
+                        onClick={() => setTxFilter('income')}
+                    >
+                        Entradas
+                    </button>
+                    <button
+                        type="button"
+                        className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg transition-colors ${txFilter === 'expense' ? 'bg-rose-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'}`}
+                        onClick={() => setTxFilter('expense')}
+                    >
+                        Saídas
+                    </button>
+                </div>
             </div>
             <div className="space-y-2 flex-1 overflow-y-auto pr-1 custom-scrollbar">
                 {(() => {
@@ -40,7 +45,7 @@ export const RecentTransactionsWidget: React.FC<RecentTransactionsWidgetProps> =
                     const list = base.filter(t => txFilter === 'all' ? true : (txFilter === 'income' ? t.transactionType === TransactionType.INCOME : t.transactionType === TransactionType.EXPENSE));
                     
                     if (list.length === 0) {
-                         return <div className="text-sm text-gray-500 text-center py-4">Nenhum lançamento recente.</div>
+                         return <div className="text-xs text-slate-500 text-center py-6">Nenhum lançamento recente.</div>
                     }
 
                     return list.map(t => {

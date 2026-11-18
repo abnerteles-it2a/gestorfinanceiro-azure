@@ -6,6 +6,8 @@ import { useToast } from './context/ToastContext';
 
 import { LoginGate } from './components/LoginGate';
 import { SettingsModal } from './components/SettingsModal';
+import { AddTransactionModal } from './components/AddTransactionModal';
+import { AddInvestmentModal } from './components/AddInvestmentModal';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const Investments = lazy(() => import('./components/Investments'));
@@ -16,16 +18,14 @@ const AdminPanel = lazy(() => import('./components/AdminPanel'));
 const OrgAdminPanel = lazy(() => import('./components/OrgAdminPanel').then(module => ({ default: module.OrgAdminPanel })));
 const Checkout = lazy(() => import('./components/Checkout').then(module => ({ default: module.Checkout })));
 const SupportPortal = lazy(() => import('./components/SupportPortal').then(module => ({ default: module.SupportPortal })));
+const EditTransactionModal = lazy(() => import('./components/EditTransactionModal').then(module => ({ default: module.EditTransactionModal })));
+const EditInvestmentModal = lazy(() => import('./components/EditInvestmentModal').then(module => ({ default: module.EditInvestmentModal })));
+const CommandPalette = lazy(() => import('./components/CommandPalette').then(module => ({ default: module.CommandPalette })));
 import { Header } from './components/Header';
-import { PlusIcon, WalletIcon, TrendingUpIcon, ListBulletIcon, BankIcon, UploadIcon, CalendarIcon, SparklesIcon, UsersIcon, HelpCircleIcon } from './components/icons';
+import { WalletIcon, TrendingUpIcon, ListBulletIcon, BankIcon, UploadIcon, UsersIcon, HelpCircleIcon } from './components/icons';
 import HomeModule from './components/HomeModule';
-import { AddTransactionModal } from './components/AddTransactionModal';
-import { AddInvestmentModal } from './components/AddInvestmentModal';
-import { EditTransactionModal } from './components/EditTransactionModal';
-import { EditInvestmentModal } from './components/EditInvestmentModal';
 import { LoaderState } from './components/ui/LoaderState';
 import { WelcomeModal } from './components/WelcomeModal';
-import { CommandPalette } from './components/CommandPalette';
 import { CalendarWidget } from './components/CalendarWidget';
 import { WeatherWidget } from './components/WeatherWidget';
 import type { ModalType, Transaction, AnyInvestment } from './types';
@@ -66,10 +66,10 @@ const SidebarNav: React.FC<{ collapsed: boolean; setCollapsed: (v: boolean) => v
                 collapsed ? 'h-16 flex items-center justify-center border-b border-white/5' : 'h-20 flex flex-col justify-center px-5 border-b border-slate-800'
             } shrink-0`}>
                 {collapsed ? (
-                    <img src="/logo_white.png" alt="Logo" className="w-12 h-12 object-contain opacity-95" />
+                    <img src="/logo_white.png" alt="Gestor Financeiro" width={48} height={48} className="w-12 h-12 object-contain opacity-95" />
                 ) : (
                     <div className="flex items-center gap-3 overflow-hidden">
-                            <img src="/logo_white.png" alt="Logo" className="w-12 h-12 object-contain opacity-95" />
+                            <img src="/logo_white.png" alt="Gestor Financeiro" width={48} height={48} className="w-12 h-12 object-contain opacity-95" />
                             <div className="flex flex-col">
                                 <span className="block font-bold text-white text-[13px] leading-tight truncate tracking-tight uppercase">Gestor Financeiro</span>
                                 <span className="block text-[9px] text-slate-500 font-bold truncate uppercase tracking-[0.14em]">Enterprise Ecosystem</span>
@@ -94,17 +94,19 @@ const SidebarNav: React.FC<{ collapsed: boolean; setCollapsed: (v: boolean) => v
 
             <div className={`flex ${collapsed ? 'justify-center' : 'justify-end'} px-2 py-1 shrink-0`}>
                 <button
+                    type="button"
                     onClick={() => { const v = !collapsed; setManual(true); setCollapsed(v); try { window.localStorage.setItem('gestor_financeiro_sidebar_collapsed', v ? '1' : '0'); } catch {} }}
-                    className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-colors"
+                    className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D9488]"
+                    aria-label={collapsed ? 'Expandir barra lateral' : 'Colapsar barra lateral'}
                     title={collapsed ? 'Expandir' : 'Colapsar'}
                 >
-                    <ListBulletIcon className="h-4 w-4" />
+                    <ListBulletIcon className="h-4 w-4" aria-hidden="true" />
                 </button>
             </div>
 
-            <nav className={`flex-1 py-1 ${collapsed ? 'px-2' : 'px-2 lg:px-3'} space-y-1 overflow-y-auto overflow-x-hidden`}>
-                <button onClick={() => setActiveView('dashboard')} className={navBtnClass('dashboard')} style={activeStyle('dashboard')} title="Dashboard">
-                    <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+            <nav aria-label="Menu lateral" className={`flex-1 py-1 ${collapsed ? 'px-2' : 'px-2 lg:px-3'} space-y-1 overflow-y-auto overflow-x-hidden`}>
+                <button type="button" onClick={() => setActiveView('dashboard')} className={navBtnClass('dashboard')} style={activeStyle('dashboard')} aria-label="Dashboard" title="Dashboard">
+                    <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                         <rect x="3" y="3" width="7" height="9" rx="1.5" />
                         <rect x="14" y="3" width="7" height="5" rx="1.5" />
                         <rect x="14" y="12" width="7" height="9" rx="1.5" />
@@ -113,43 +115,43 @@ const SidebarNav: React.FC<{ collapsed: boolean; setCollapsed: (v: boolean) => v
                     {!collapsed && <span className="whitespace-nowrap">Dashboard</span>}
                 </button>
                 {canFinanceAccounting && (
-                    <button onClick={() => setActiveView('financeAccounting')} className={navBtnClass('financeAccounting')} style={activeStyle('financeAccounting')} title="Financeiro/Contábil">
-                        <BankIcon className="h-5 w-5 shrink-0" />
+                    <button type="button" onClick={() => setActiveView('financeAccounting')} className={navBtnClass('financeAccounting')} style={activeStyle('financeAccounting')} aria-label="Financeiro e Contábil" title="Financeiro/Contábil">
+                        <BankIcon className="h-5 w-5 shrink-0" aria-hidden="true" />
                         {!collapsed && <span className="whitespace-nowrap">Financeiro/Contábil</span>}
                     </button>
                 )}
                 {canInvestments && (
-                    <button onClick={() => setActiveView('investments')} className={navBtnClass('investments')} style={activeStyle('investments')} title="Investimentos">
-                        <TrendingUpIcon className="h-5 w-5 shrink-0" />
+                    <button type="button" onClick={() => setActiveView('investments')} className={navBtnClass('investments')} style={activeStyle('investments')} aria-label="Investimentos" title="Investimentos">
+                        <TrendingUpIcon className="h-5 w-5 shrink-0" aria-hidden="true" />
                         {!collapsed && <span className="whitespace-nowrap">Investimentos</span>}
                     </button>
                 )}
-                <button onClick={() => setActiveView('reports')} className={navBtnClass('reports')} style={activeStyle('reports')} title="Relatórios">
-                    <ListBulletIcon className="h-5 w-5 shrink-0" />
+                <button type="button" onClick={() => setActiveView('reports')} className={navBtnClass('reports')} style={activeStyle('reports')} aria-label="Relatórios" title="Relatórios">
+                    <ListBulletIcon className="h-5 w-5 shrink-0" aria-hidden="true" />
                     {!collapsed && <span className="whitespace-nowrap">Relatórios</span>}
                 </button>
                 {canDocsVault && (
-                    <button onClick={() => setActiveView('docsVault')} className={navBtnClass('docsVault')} style={activeStyle('docsVault')} title="Cofre de Documentos">
-                        <UploadIcon className="h-5 w-5 shrink-0" />
+                    <button type="button" onClick={() => setActiveView('docsVault')} className={navBtnClass('docsVault')} style={activeStyle('docsVault')} aria-label="Cofre de Documentos" title="Cofre de Documentos">
+                        <UploadIcon className="h-5 w-5 shrink-0" aria-hidden="true" />
                         {!collapsed && <span className="whitespace-nowrap">Cofre de Docs</span>}
                     </button>
                 )}
                 {entitlements?.modules?.corporateManagement && (
-                    <button onClick={() => setActiveView('orgAdmin')} className={navBtnClass('orgAdmin')} style={activeStyle('orgAdmin')} title="Gestão Corporativa">
-                        <UsersIcon className="h-5 w-5 shrink-0" />
+                    <button type="button" onClick={() => setActiveView('orgAdmin')} className={navBtnClass('orgAdmin')} style={activeStyle('orgAdmin')} aria-label="Gestão Corporativa" title="Gestão Corporativa">
+                        <UsersIcon className="h-5 w-5 shrink-0" aria-hidden="true" />
                         {!collapsed && <span className="whitespace-nowrap">Gestão Corporativa</span>}
                     </button>
                 )}
 
                 {!collapsed && (
-                    <div className="mt-2 px-1 animate-in fade-in slide-in-from-bottom-2 duration-500 dark">
+                    <div className="mt-2 px-1 animate-fade-in dark">
                         <div className="h-px bg-slate-800 mb-2 opacity-50 mx-2"></div>
                         <CalendarWidget isSidebar={true} />
                     </div>
                 )}
                 
-                <button onClick={() => setActiveView('support')} className={navBtnClass('support')} style={activeStyle('support')} title="Ajuda & Suporte">
-                    <HelpCircleIcon className="h-5 w-5 shrink-0" />
+                <button type="button" onClick={() => setActiveView('support')} className={navBtnClass('support')} style={activeStyle('support')} aria-label="Ajuda e Suporte" title="Ajuda & Suporte">
+                    <HelpCircleIcon className="h-5 w-5 shrink-0" aria-hidden="true" />
                     {!collapsed && <span className="whitespace-nowrap">Ajuda & Suporte</span>}
                 </button>
             </nav>
@@ -233,12 +235,11 @@ const AppContent: React.FC = () => {
     
 
     
-    const [showSplash, setShowSplash] = useState(false);
-
     const handleSetActiveView = (newView: ActiveView) => {
-        if (activeView === 'home' && newView !== 'home') {
-            setShowSplash(true);
-            setTimeout(() => setShowSplash(false), 900);
+        if (newView === 'cashflow') {
+            setFinanceSubTab('cashflow');
+            setActiveView('financeAccounting');
+            return;
         }
         setActiveView(newView);
     };
@@ -412,8 +413,10 @@ const AppContent: React.FC = () => {
                 >
                     <div className="omie-topbar-brand">
                         <button
+                            type="button"
                             onClick={() => user && handleSetActiveView('home')}
-                            className="flex items-center gap-3 bg-transparent border-none cursor-pointer text-white p-0"
+                            aria-label="Ir para o Início"
+                            className="flex items-center gap-3 bg-transparent border-none cursor-pointer text-white p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D9488] rounded"
                         >
                             {(activeView === 'home' || sidebarCollapsed) && (
                                 <>
@@ -439,30 +442,34 @@ const AppContent: React.FC = () => {
                     </div>
                     <div className="flex items-center gap-5">
                         <button
+                            type="button"
                             onClick={() => user && openSettings()}
+                            aria-label="Abrir Configurações"
                             title="Configurações"
-                            className="text-white/90 hover:text-white transition-colors cursor-pointer drop-shadow-md"
+                            className="text-white/90 hover:text-white transition-colors cursor-pointer drop-shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D9488] rounded p-1"
                         >
-                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
                                 <circle cx="12" cy="12" r="3"/>
                                 <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
                             </svg>
                         </button>
                         {user && (
-                            <div
-                                className="flex items-center gap-2 pl-4 border-l border-white/20 cursor-pointer group drop-shadow-md"
-                                onClick={async () => { if (window.confirm('Sair do sistema?')) await signOut(); }}
+                            <button
+                                type="button"
+                                aria-label="Sair do sistema"
+                                className="flex items-center gap-2 pl-4 border-l border-white/20 cursor-pointer group drop-shadow-md bg-transparent border-y-0 border-r-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D9488] rounded"
+                                onClick={async () => { await signOut(); }}
                                 title="Sair"
                             >
                                 <span className="text-[11px] font-bold text-white/90 uppercase tracking-widest group-hover:text-[#0D9488] transition-colors hidden sm:inline">
                                     Sair
                                 </span>
                                 {showTopbarIdentity && (
-                                    <div className="w-7 h-7 rounded-full bg-white/30 flex items-center justify-center text-white border border-white/40 text-[11px] font-bold group-hover:bg-[#0D9488] transition-all">
+                                    <div className="w-7 h-7 rounded-full bg-white/30 flex items-center justify-center text-white border border-white/40 text-[11px] font-bold group-hover:bg-[#0D9488] transition-colors">
                                         {(user?.email || 'U').charAt(0).toUpperCase()}
                                     </div>
                                 )}
-                            </div>
+                            </button>
                         )}
                     </div>
                 </header>
@@ -493,11 +500,11 @@ const AppContent: React.FC = () => {
                         />
                     )}
                     {activeView !== 'home' && (
-                        <Suspense fallback={<LoaderState message="Carregando módulo..." className="min-h-[45vh]" />}>
+                        <Suspense fallback={<LoaderState message="Carregando módulo…" className="min-h-[45vh]" />}>
                             <div className="app-content-limit">
                                 {activeView === 'dashboard' && <Dashboard />}
                                 {activeView === 'investments' && <Investments onEditInvestment={handleEditInvestment} />}
-                                {activeView === 'financeAccounting' && (
+                                {(activeView === 'financeAccounting' || activeView === 'cashflow') && (
                                     <FinanceAccounting
                                         activeSubTab={financeSubTab}
                                         setActiveSubTab={setFinanceSubTab}
@@ -557,62 +564,70 @@ const AppContent: React.FC = () => {
                 </nav>
             )}
 
-            {/* ── MODAIS (sem alteração) ── */}
-            <AddTransactionModal
-                isOpen={activeModal === 'transaction'}
-                onClose={() => setActiveModal(null)}
-                onAddAccount={() => {
-                    setActiveModal(null);
-                    openSettings('accounts');
-                }}
-                initial={addInitial}
-            />
-            <AddInvestmentModal
-                isOpen={activeModal === 'investment'}
-                onClose={() => setActiveModal(null)}
-                initial={investmentAddInitial}
-            />
-            {transactionToEdit && (
-                <EditTransactionModal
-                    isOpen={!!transactionToEdit}
-                    onClose={() => setTransactionToEdit(null)}
-                    transaction={transactionToEdit}
+            {/* ── MODAIS ── */}
+            <Suspense fallback={null}>
+                {activeModal === 'transaction' && (
+                    <AddTransactionModal
+                        isOpen={true}
+                        onClose={() => setActiveModal(null)}
+                        onAddAccount={() => {
+                            setActiveModal(null);
+                            openSettings('accounts');
+                        }}
+                        initial={addInitial}
+                    />
+                )}
+                {activeModal === 'investment' && (
+                    <AddInvestmentModal
+                        isOpen={true}
+                        onClose={() => setActiveModal(null)}
+                        initial={investmentAddInitial}
+                    />
+                )}
+                {transactionToEdit && (
+                    <EditTransactionModal
+                        isOpen={!!transactionToEdit}
+                        onClose={() => setTransactionToEdit(null)}
+                        transaction={transactionToEdit}
+                    />
+                )}
+                {investmentToEdit && (
+                    <EditInvestmentModal
+                        isOpen={!!investmentToEdit}
+                        onClose={() => setInvestmentToEdit(null)}
+                        investment={investmentToEdit}
+                    />
+                )}
+                {isSettingsModalOpen && (
+                    <SettingsModal
+                        isOpen={true}
+                        onClose={() => {
+                            setSettingsModalOpen(false);
+                            setSettingsInitialTab(undefined);
+                        }}
+                        onUpgrade={handleOpenCheckout}
+                        initialTab={settingsInitialTab}
+                    />
+                )}
+                <WelcomeModal
+                    isOpen={showWelcome}
+                    onClose={() => setShowWelcome(false)}
                 />
-            )}
-            {investmentToEdit && (
-                <EditInvestmentModal
-                    isOpen={!!investmentToEdit}
-                    onClose={() => setInvestmentToEdit(null)}
-                    investment={investmentToEdit}
+                <CommandPalette
+                    isOpen={isCommandPaletteOpen}
+                    onClose={() => setIsCommandPaletteOpen(false)}
+                    onNavigate={(view) => handleSetActiveView(view)}
+                    toggleTheme={toggleTheme}
+                    isDark={theme === 'dark'}
                 />
-            )}
-            <SettingsModal
-                isOpen={isSettingsModalOpen}
-                onClose={() => {
-                    setSettingsModalOpen(false);
-                    setSettingsInitialTab(undefined);
-                }}
-                onUpgrade={handleOpenCheckout}
-                initialTab={settingsInitialTab}
-            />
-            <WelcomeModal
-                isOpen={showWelcome}
-                onClose={() => setShowWelcome(false)}
-            />
-            <CommandPalette
-                isOpen={isCommandPaletteOpen}
-                onClose={() => setIsCommandPaletteOpen(false)}
-                onNavigate={(view) => handleSetActiveView(view)}
-                toggleTheme={toggleTheme}
-                isDark={theme === 'dark'}
-            />
+            </Suspense>
 
             {/* ── SUBSCRIPTION BLOCK OVERLAY ── */}
             {subscriptionInfo?.isTotalBlocked && activeView !== 'checkout' && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 backdrop-blur-md bg-slate-900/60 animate-in fade-in duration-500">
-                    <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[2.5rem] p-10 shadow-2xl border border-slate-200 dark:border-slate-800 text-center space-y-8 animate-in zoom-in-95 duration-500">
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 backdrop-blur-md bg-slate-900/60 animate-fade-in">
+                    <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[2.5rem] p-10 shadow-2xl border border-slate-200 dark:border-slate-800 text-center space-y-8 animate-portal-enter">
                         <div className="w-24 h-24 bg-rose-100 dark:bg-rose-950/30 text-rose-600 rounded-full flex items-center justify-center mx-auto ring-8 ring-rose-50 dark:ring-rose-900/20">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.4} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                             </svg>
                         </div>
@@ -624,12 +639,14 @@ const AppContent: React.FC = () => {
                         </div>
                         <div className="flex flex-col gap-3 pt-2">
                             <button
+                                type="button"
                                 onClick={() => handleSetActiveView('checkout')}
-                                className="w-full py-4 bg-[#0D9488] text-white rounded-full font-black uppercase tracking-widest text-xs hover:bg-[#0F766E] shadow-xl transition-all active:scale-95"
+                                className="w-full py-4 bg-[#0D9488] text-white rounded-full font-black uppercase tracking-widest text-xs hover:bg-[#0F766E] shadow-xl transition-colors active:scale-95"
                             >
                                 Regularizar Assinatura
                             </button>
                             <button
+                                type="button"
                                 onClick={async () => await signOut()}
                                 className="w-full py-4 text-slate-400 font-bold uppercase tracking-widest text-[10px] hover:text-slate-600 transition-colors"
                             >
@@ -644,41 +661,6 @@ const AppContent: React.FC = () => {
             {/* ── LOGIN GATE ── */}
             {!user && (
                 <LoginGate onOpenSettings={() => openSettings('auth')} />
-            )}
-
-            {/* ── SPLASH SCREEN (home → módulo) ── */}
-            {showSplash && (
-                <div
-                    className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[#020617]"
-                    style={{ animation: 'gestorSplashIn 0.9s ease forwards' }}
-                >
-                    <style>{`
-                        @keyframes gestorSplashIn {
-                            0%   { opacity: 0; }
-                            15%  { opacity: 1; }
-                            75%  { opacity: 1; }
-                            100% { opacity: 0; }
-                        }
-                    `}</style>
-                    <div className="flex flex-col items-center gap-5">
-                        <div className="flex items-center gap-4">
-                            <img src="/logo_white.png" alt="IT2A" className="h-10 w-auto object-contain opacity-90"
-                                 onError={e => (e.target as HTMLImageElement).style.display = 'none'} />
-                            <div className="h-10 w-px bg-white/10" />
-                            <div>
-                                <span className="text-[22px] font-black text-white tracking-tight leading-none">Gestor Financeiro</span>
-                                <p className="text-[9px] font-black text-[#0D9488] uppercase tracking-[0.3em] mt-1">
-                                    Enterprise · by IT2A
-                                </p>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-2 mt-2">
-                            <div className="w-1.5 h-1.5 rounded-full bg-[#0D9488] animate-bounce" style={{ animationDelay: '0ms' }} />
-                            <div className="w-1.5 h-1.5 rounded-full bg-[#0D9488] animate-bounce" style={{ animationDelay: '150ms' }} />
-                            <div className="w-1.5 h-1.5 rounded-full bg-[#0D9488] animate-bounce" style={{ animationDelay: '300ms' }} />
-                        </div>
-                    </div>
-                </div>
             )}
         </div>
     );

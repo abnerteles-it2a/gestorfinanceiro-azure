@@ -35,14 +35,14 @@ const VIEW_TITLES: Record<string, string> = {
 
 export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, onOpenSettings, onUpgrade, hideBar = false, moduleTitle }) => {
     const { theme, toggleTheme } = useTheme();
-    const { 
-        isPrivacyMode, togglePrivacyMode, marketDataTs, isMarketLoading, 
-        planInfo, orgRole, viewMode, toggleViewMode, organizationInfo, 
-        entitlements, usage, userPreferences, isMei, subscriptionInfo 
+    const {
+        isPrivacyMode, togglePrivacyMode, marketDataTs, isMarketLoading,
+        planInfo, orgRole, viewMode, toggleViewMode, organizationInfo,
+        entitlements, usage, userPreferences, isMei, subscriptionInfo, refreshData
     } = useFinancialData();
     const { user, isAdmin } = useAuth();
     const { showToast } = useToast();
-    
+
     const showTrialBanner = !!(subscriptionInfo?.isTrial && !subscriptionInfo?.isExpired);
     const showGraceBanner = !!(subscriptionInfo?.isInsideGrace);
     const showExpiredBanner = !!(subscriptionInfo?.isTotalBlocked || (subscriptionInfo?.isExpired && !subscriptionInfo?.isInsideGrace));
@@ -136,15 +136,15 @@ export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, onOpe
                             if (!organizationInfo) return null;
                             if (tier !== 'pro' && !isTrial) return null;
                             const isOrg = viewMode === 'organization';
-                            
+
                             return (
                                 <div className="flex items-center gap-2 bg-slate-100/80 dark:bg-slate-900/60 p-0.5 rounded-xl border border-slate-200/60 dark:border-slate-800">
                                     <div className="flex p-0.5 gap-1">
                                         <button
                                             onClick={() => viewMode !== 'personal' && toggleViewMode()}
                                             className={`px-3 py-1 rounded-lg text-[9.5px] font-black uppercase tracking-wider transition-all ${
-                                                !isOrg 
-                                                ? 'bg-white dark:bg-slate-800 shadow-xs text-[#0D9488] dark:text-[#0D9488] ring-1 ring-slate-200/50 dark:ring-white/10' 
+                                                !isOrg
+                                                ? 'bg-white dark:bg-slate-800 shadow-xs text-[#0D9488] dark:text-[#0D9488] ring-1 ring-slate-200/50 dark:ring-white/10'
                                                 : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300'
                                             }`}
                                         >
@@ -153,8 +153,8 @@ export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, onOpe
                                         <button
                                             onClick={() => viewMode !== 'organization' && toggleViewMode()}
                                             className={`px-3 py-1 rounded-lg text-[9.5px] font-black uppercase tracking-wider transition-all ${
-                                                isOrg 
-                                                ? 'bg-white dark:bg-slate-800 shadow-xs text-[#0D9488] dark:text-[#0D9488] ring-1 ring-slate-200/50 dark:ring-white/10' 
+                                                isOrg
+                                                ? 'bg-white dark:bg-slate-800 shadow-xs text-[#0D9488] dark:text-[#0D9488] ring-1 ring-slate-200/50 dark:ring-white/10'
                                                 : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300'
                                             }`}
                                             title={organizationInfo.name}
@@ -198,7 +198,11 @@ export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, onOpe
                         {(planInfo?.tier === 'plus' || subscriptionInfo?.isTrial) && (
                             <div className="hidden md:flex items-center gap-2 bg-[#0D9488]/10 dark:bg-slate-900/40 px-3 py-1.5 rounded-xl border border-[#0D9488]/20 dark:border-slate-800" title="Ative para habilitar o Painel MEI e Controle de DAS">
                                 <span className="text-[10px] font-black uppercase tracking-widest text-[#0D9488] dark:text-[#0D9488]">Modo MEI</span>
-                                <button 
+                                <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={!!isMei}
+                                    aria-label="Alternar Modo MEI"
                                     onClick={async () => {
                                         try {
                                             const newProf = isMei ? 'pf' : 'mei';
@@ -210,7 +214,11 @@ export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, onOpe
                                             });
                                             if (res.ok) {
                                                 showToast(newProf === 'mei' ? 'Painel MEI ativado!' : 'Modo Pessoal ativado!', 'success');
-                                                setTimeout(() => window.location.reload(), 600);
+                                                if (typeof refreshData === 'function') {
+                                                    refreshData();
+                                                } else {
+                                                    setTimeout(() => window.location.reload(), 600);
+                                                }
                                             } else {
                                                 throw new Error('Falha ao atualizar');
                                             }
@@ -218,7 +226,7 @@ export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, onOpe
                                             showToast('Erro ao alterar modo.', 'error');
                                         }
                                     }}
-                                    className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors shadow-inner ${isMei ? 'bg-[#0D9488]' : 'bg-slate-300 dark:bg-slate-700'}`}
+                                    className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors shadow-inner focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D9488] ${isMei ? 'bg-[#0D9488]' : 'bg-slate-300 dark:bg-slate-700'}`}
                                 >
                                     <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform shadow-sm ${isMei ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
                                 </button>
@@ -226,18 +234,21 @@ export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, onOpe
                         )}
 
                         {planInfo?.tier !== 'pro' && !subscriptionInfo?.isTrial && (
-                            <button 
+                            <button
+                                type="button"
                                 onClick={() => onUpgrade?.('pro')}
                                 className="hidden sm:flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#0D9488] text-white text-[11px] font-black uppercase tracking-wider hover:bg-[#0F766E] hover:shadow-lg hover:shadow-[#0D9488]/20 transition-all hover:-translate-y-0.5 active:scale-95"
                             >
-                               <SparklesIcon className="h-3.5 w-3.5" />
+                               <SparklesIcon className="h-3.5 w-3.5" aria-hidden="true" />
                                Upgrade PRO
                             </button>
                         )}
                         {user && (
                             <button
+                                type="button"
+                                aria-label="Abrir barra de comandos rápidos (Ctrl + K)"
                                 onClick={() => window.dispatchEvent(new CustomEvent('open_command_palette'))}
-                                className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800/80 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white border border-slate-200 dark:border-slate-700/60 transition-all text-xs font-medium active:scale-95"
+                                className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800/80 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white border border-slate-200 dark:border-slate-700/60 transition-colors text-xs font-medium active:scale-95"
                                 title="Buscar ou executar comando (Ctrl + K)"
                             >
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -266,44 +277,26 @@ export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, onOpe
                         </button>
                     </div>
                 </div>
-    <div className="md:hidden pb-2 flex flex-col space-y-2">
-        {organizationInfo && (
-            <div className="flex justify-center items-center bg-gray-100 dark:bg-gray-700 rounded-lg p-1 mx-4">
+    {organizationInfo && (String(planInfo?.tier || '').toLowerCase() === 'pro' || !!subscriptionInfo?.isTrial) && (
+        <div className="md:hidden pb-2 flex flex-col space-y-2">
+            <div className="flex justify-center items-center bg-slate-100 dark:bg-slate-800 rounded-xl p-1 mx-4 border border-slate-200/60 dark:border-slate-700">
                 <button
+                    type="button"
                     onClick={() => viewMode !== 'personal' && toggleViewMode()}
-                    className={`flex-1 py-1 text-xs rounded-md font-medium transition-all text-center ${viewMode === 'personal' ? 'bg-white dark:bg-gray-600 shadow-sm text-indigo-600 dark:text-indigo-300' : 'text-gray-500 dark:text-gray-400'}`}
+                    className={`flex-1 py-1 text-xs rounded-lg font-bold uppercase tracking-wider transition-colors text-center ${viewMode === 'personal' ? 'bg-white dark:bg-slate-900 shadow-sm text-[#0D9488]' : 'text-slate-500 dark:text-slate-400'}`}
                 >
                     Pessoal
                 </button>
                 <button
+                    type="button"
                     onClick={() => viewMode !== 'organization' && toggleViewMode()}
-                    className={`flex-1 py-1 text-xs rounded-md font-medium transition-all text-center ${viewMode === 'organization' ? 'bg-white dark:bg-gray-600 shadow-sm text-indigo-600 dark:text-indigo-300' : 'text-gray-500 dark:text-gray-400'}`}
+                    className={`flex-1 py-1 text-xs rounded-lg font-bold uppercase tracking-wider transition-colors text-center ${viewMode === 'organization' ? 'bg-white dark:bg-slate-900 shadow-sm text-[#0D9488]' : 'text-slate-500 dark:text-slate-400'}`}
                 >
                     Org: {organizationInfo.name}
                 </button>
             </div>
-        )}
-        <div className="flex justify-center space-x-2">
-                     <button
-                        onClick={() => setActiveView('dashboard')}
-                        className={`px-3 py-1 rounded text-xs ${activeView === 'dashboard' ? 'bg-[#0D9488] text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
-                    >
-                        Dash
-                    </button>
-                    <button
-                        onClick={() => setActiveView('investments')}
-                        className={`px-3 py-1 rounded text-xs ${activeView === 'investments' ? 'bg-[#0D9488] text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
-                    >
-                        Invest
-                    </button>
-                    <button
-                        onClick={() => setActiveView('financeAccounting')}
-                        className={`px-3 py-1 rounded text-xs ${activeView === 'financeAccounting' ? 'bg-[#0D9488] text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
-                    >
-                        Fin/Cont
-                    </button>
-                </div>
-            </div>
+        </div>
+    )}
             </div>
         </header>
             )}

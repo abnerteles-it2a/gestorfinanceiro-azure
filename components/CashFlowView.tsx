@@ -50,13 +50,13 @@ const CashFlowTransactionItem: React.FC<{ transaction: Transaction, onEdit: () =
                     </StatusTag>
                 </div>
             </div>
-            <div className="col-span-1 text-right sm:opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-1 group-hover:translate-x-0">
+            <div className="col-span-1 text-right sm:opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-all duration-300 translate-x-1 group-hover:translate-x-0 focus-within:translate-x-0">
                 <div className="flex items-center justify-end space-x-1">
-                    <button onClick={onEdit} className="p-1.5 text-slate-300 hover:text-indigo-500 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-md transition-all active:scale-95" title="Editar">
-                        <EditIcon className="h-4 w-4" />
+                    <button type="button" onClick={onEdit} aria-label={`Editar ${transaction.description}`} className="p-1.5 text-slate-300 hover:text-indigo-500 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-md transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D9488]" title="Editar">
+                        <EditIcon className="h-4 w-4" aria-hidden="true" />
                     </button>
-                    <button onClick={onDelete} className="p-1.5 text-slate-300 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-md transition-all active:scale-95" title="Excluir">
-                        <TrashIcon className="h-4 w-4" />
+                    <button type="button" onClick={onDelete} aria-label={`Excluir ${transaction.description}`} className="p-1.5 text-slate-300 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-md transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500" title="Excluir">
+                        <TrashIcon className="h-4 w-4" aria-hidden="true" />
                     </button>
                 </div>
             </div>

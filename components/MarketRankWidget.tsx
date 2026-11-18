@@ -61,59 +61,6 @@ export const MarketRankWidget: React.FC<{
     ]
   });
 
-  // Track price flash updates
-  const [flashMap, setFlashMap] = useState<Record<string, 'up' | 'down' | null>>({});
-  const timeoutRefs = useRef<Record<string, NodeJS.Timeout>>({});
-
-  // Simulated live fluctuation micro-animation to feel alive
-  useEffect(() => {
-    const interval = setInterval(() => {
-      // Pick a random category and asset
-      const categories = ['acoes', 'fiis', 'eua', 'cripto'] as const;
-      const randomCat = categories[Math.floor(Math.random() * categories.length)];
-      const items = rankData[randomCat];
-      const randomIdx = Math.floor(Math.random() * items.length);
-      const target = items[randomIdx];
-
-      // Fluctuate price by a small percentage (-0.4% to +0.4%)
-      const changePercent = (Math.random() * 0.8 - 0.4) / 100;
-      const oldPrice = target.price;
-      const newPrice = Number((oldPrice * (1 + changePercent)).toFixed(target.price < 5 ? 3 : 2));
-      const direction = newPrice > oldPrice ? 'up' : newPrice < oldPrice ? 'down' : null;
-
-      if (!direction) return;
-
-      // Update price and change
-      setRankData(prev => {
-        const copy = { ...prev };
-        const listCopy = [...copy[randomCat]];
-        listCopy[randomIdx] = {
-          ...target,
-          price: newPrice,
-          change: Number((target.change + changePercent * 100).toFixed(2))
-        };
-        copy[randomCat] = listCopy;
-        return copy;
-      });
-
-      // Trigger flash highlight
-      const key = `${randomCat}-${target.symbol}`;
-      setFlashMap(prev => ({ ...prev, [key]: direction }));
-
-      // Clear flash after 800ms
-      if (timeoutRefs.current[key]) clearTimeout(timeoutRefs.current[key]);
-      timeoutRefs.current[key] = setTimeout(() => {
-        setFlashMap(prev => ({ ...prev, [key]: null }));
-      }, 800);
-
-    }, 3000); // every 3 seconds
-
-    return () => {
-      clearInterval(interval);
-      Object.values(timeoutRefs.current).forEach(t => clearTimeout(t));
-    };
-  }, [rankData]);
-
   const activeList = rankData[activeTab];
 
   return (
@@ -139,8 +86,8 @@ export const MarketRankWidget: React.FC<{
           <span style={{ color: 'white', fontSize: 12, fontWeight: 900, letterSpacing: '-0.01em' }}>
             🏆 Top Ativos
           </span>
-          <span style={{ color: '#10B981', fontSize: 8, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', background: 'rgba(16,185,129,0.15)', padding: '2px 6px', borderRadius: 20, border: '1px solid rgba(16,185,129,0.3)' }}>
-            RANK
+          <span title="Referência estática de mercado" style={{ color: '#10B981', fontSize: 8, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', background: 'rgba(16,185,129,0.15)', padding: '2px 6px', borderRadius: 20, border: '1px solid rgba(16,185,129,0.3)' }}>
+            REF. MERCADO
           </span>
         </div>
       </div>
@@ -154,6 +101,7 @@ export const MarketRankWidget: React.FC<{
           { id: 'cripto', label: '🪙 Cripto' }
         ] as const).map(tab => (
           <button
+            type="button"
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             style={{
@@ -164,7 +112,7 @@ export const MarketRankWidget: React.FC<{
               borderRadius: 8,
               border: 'none',
               cursor: 'pointer',
-              transition: 'all 0.2s',
+              transition: 'background-color 0.2s, color 0.2s',
               background: activeTab === tab.id ? 'rgba(13,148,136,0.2)' : 'transparent',
               color: activeTab === tab.id ? '#2DD4BF' : 'rgba(255,255,255,0.4)',
               outline: activeTab === tab.id ? '1px solid rgba(13,148,136,0.4)' : '1px solid transparent',
@@ -180,8 +128,6 @@ export const MarketRankWidget: React.FC<{
       <div className="custom-scrollbar" style={{ flex: 1, padding: '12px 16px', overflowY: 'auto', minHeight: 0 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {activeList.map((item, idx) => {
-            const flashKey = `${activeTab}-${item.symbol}`;
-            const flash = flashMap[flashKey];
             const isPositive = item.change >= 0;
             
             return (
@@ -195,12 +141,6 @@ export const MarketRankWidget: React.FC<{
                   background: 'rgba(255,255,255,0.04)',
                   borderRadius: 10,
                   border: '1px solid rgba(255,255,255,0.06)',
-                  transition: 'all 0.4s ease',
-                  backgroundColor: flash === 'up' 
-                    ? 'rgba(16,185,129,0.12)' 
-                    : flash === 'down' 
-                    ? 'rgba(248,113,113,0.12)' 
-                    : 'rgba(255,255,255,0.04)',
                 }}
               >
                 {/* Symbol & Rank */}
@@ -225,8 +165,8 @@ export const MarketRankWidget: React.FC<{
                       style={{
                         fontSize: 11,
                         fontWeight: 900,
-                        color: flash === 'up' ? '#10B981' : flash === 'down' ? '#F87171' : 'white',
-                        transition: 'color 0.2s ease',
+                        color: 'white',
+                        fontVariantNumeric: 'tabular-nums',
                       }}
                     >
                       {fmtPrice(item.price, item.currency)}

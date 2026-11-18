@@ -5,19 +5,21 @@ interface LoaderStateProps {
     className?: string;
 }
 
-export const LoaderState: React.FC<LoaderStateProps> = ({ 
-    message = 'Carregando dados...', 
-    className = '' 
+export const LoaderState: React.FC<LoaderStateProps> = ({
+    message = 'Carregando dados…',
+    className = ''
 }) => {
     return (
-        <div className={`flex flex-col items-center justify-center p-12 w-full min-h-[200px] ${className}`}>
-            <div className="relative flex items-center justify-center w-12 h-12 mb-4">
+        <div role="status" aria-live="polite" className={`flex flex-col items-center justify-center p-12 w-full min-h-[200px] ${className}`}>
+            <div className="relative flex items-center justify-center w-12 h-12 mb-4" aria-hidden="true">
                 {/* Ping animation behind the logo */}
-                <div className="absolute inset-0 rounded-full border-2 border-indigo-400/30 animate-ping"></div>
+                <div className="absolute inset-0 rounded-full border-2 border-teal-400/30 animate-ping"></div>
                 {/* Logo pulse */}
-                <img 
-                    src="/logo.png" 
-                    alt="IT2A Loader" 
+                <img
+                    src="/logo.png"
+                    alt=""
+                    width={40}
+                    height={40}
                     className="w-10 h-10 object-contain animate-pulse mix-blend-multiply dark:mix-blend-normal opacity-70"
                 />
             </div>

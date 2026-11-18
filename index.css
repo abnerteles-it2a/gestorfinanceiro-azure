@@ -1,4 +1,11 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+@source "./index.html";
+@source "./index.tsx";
+@source "./App.tsx";
+@source "./components";
+@source "./context";
+@source "./hooks";
+@source "./utils";
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
@@ -143,7 +150,7 @@ html {
 
   /* High-Density Omie Tables */
   .omie-table-container {
-    @apply bg-white border border-[#E0E7EF] rounded-xl overflow-hidden shadow-sm;
+    @apply bg-white dark:bg-slate-900 border border-[#E0E7EF] dark:border-slate-800 rounded-xl overflow-hidden shadow-sm;
   }
 
   .omie-table {
@@ -151,37 +158,37 @@ html {
   }
 
   .omie-table thead tr {
-    @apply bg-white border-b border-slate-100;
+    @apply bg-white dark:bg-slate-900/90 border-b border-slate-100 dark:border-slate-800;
   }
 
   .omie-table th {
-    @apply px-3 py-2 md:px-5 md:py-3 lg:px-6 lg:py-4 text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap;
+    @apply px-3 py-2 md:px-5 md:py-3 lg:px-6 lg:py-4 text-[9px] md:text-[10px] font-black text-slate-400 dark:text-slate-400 uppercase tracking-widest whitespace-nowrap;
   }
 
   .omie-table tbody tr {
-    @apply border-b border-slate-50 hover:bg-slate-50/50 transition-colors;
+    @apply border-b border-slate-50 dark:border-slate-800/60 hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-colors;
   }
 
   .omie-table td {
-    @apply px-3 py-2 md:px-5 md:py-3 lg:px-6 lg:py-4 text-xs md:text-sm font-medium text-[#020617] tabular-nums;
+    @apply px-3 py-2 md:px-5 md:py-3 lg:px-6 lg:py-4 text-xs md:text-sm font-medium text-[#020617] dark:text-slate-100 tabular-nums;
   }
 
   .omie-table-summary {
-    @apply bg-slate-50/50 px-6 py-3 flex justify-end gap-10 border-t border-slate-100;
+    @apply bg-slate-50/50 dark:bg-slate-900/60 px-6 py-3 flex justify-end gap-10 border-t border-slate-100 dark:border-slate-800;
   }
 
   /* Omie Buttons */
   .omie-btn-primary {
-    @apply px-8 py-2.5 text-[11px] font-black uppercase tracking-widest text-white bg-[#0D9488] hover:bg-[#0F766E] rounded-full shadow-md transition-all border-none cursor-pointer;
+    @apply px-8 py-2.5 text-[11px] font-black uppercase tracking-widest text-white bg-[#0D9488] hover:bg-[#0F766E] rounded-full shadow-md transition-colors border-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D9488] focus-visible:ring-offset-2;
   }
 
   .omie-btn-secondary {
-    @apply px-8 py-2.5 text-[11px] font-black uppercase tracking-widest text-[#0D9488] bg-white border border-[#0D9488] hover:bg-teal-50 rounded-full transition-all cursor-pointer;
+    @apply px-8 py-2.5 text-[11px] font-black uppercase tracking-widest text-[#0D9488] bg-white dark:bg-slate-900 border border-[#0D9488] hover:bg-teal-50 dark:hover:bg-teal-950/30 rounded-full transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D9488] focus-visible:ring-offset-2;
   }
 
   /* Omie Inputs */
   .omie-input {
-    @apply w-full px-5 py-3 rounded-xl border border-slate-200 bg-white text-slate-700 outline-none focus:ring-2 focus:ring-[#0D9488]/20 focus:border-[#0D9488] transition-all text-sm;
+    @apply w-full px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-100 outline-none focus:ring-2 focus:ring-[#0D9488]/20 focus:border-[#0D9488] transition-colors text-sm;
   }
 
   .omie-label {
@@ -195,12 +202,12 @@ html {
   }
 
   .omie-modal-content {
-    @apply bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col;
+    @apply bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-200/80 dark:border-slate-800 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col;
     animation: portalEnter 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
   }
 
   .omie-modal-header {
-    @apply p-4 md:p-6 lg:p-8 border-b border-slate-100 flex justify-between items-center;
+    @apply p-4 md:p-6 lg:p-8 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center;
   }
 
   .omie-modal-title {
@@ -208,13 +215,13 @@ html {
   }
 
   .omie-modal-body {
-    @apply p-4 md:p-6 lg:p-10 overflow-y-auto;
+    @apply p-4 md:p-6 lg:p-10 overflow-y-auto overscroll-contain;
     scrollbar-width: thin;
     scrollbar-color: rgba(0,0,0,0.1) transparent;
   }
 
   .omie-modal-footer {
-    @apply p-3 md:p-5 lg:p-8 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-4;
+    @apply p-3 md:p-5 lg:p-8 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50 flex justify-end gap-4;
   }
 
   .calendar-sidebar-override {
@@ -315,20 +322,39 @@ body {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 }
-.animate-fade-in {
-  animation: fadeIn 0.4s ease-out forwards;
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in,
+.animate-fadeIn,
+.animate-in {
+  animation: fadeIn 0.28s ease-out forwards;
 }
 
 .animate-fade-in-up {
   animation: fadeIn 0.3s ease-out forwards;
 }
 
+.animate-fade-in-down {
+  animation: fadeInDown 0.28s ease-out forwards;
+}
+
 @keyframes portalEnter {
   from { opacity: 0; transform: scale(0.98); }
   to { opacity: 1; transform: scale(1); }
 }
-.animate-portal-enter {
-  animation: portalEnter 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+.animate-portal-enter,
+.animate-scaleIn {
+  animation: portalEnter 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 /* Premium Mesh Grid Pattern */
@@ -343,16 +369,18 @@ body {
 
 /* Premium Transitions */
 .transition-glass {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* ===== SPATIAL / GLASSMORPHISM UI TEST ===== */
+/* ===== SPATIAL / GLASSMORPHISM UI ===== */
 .bg-spatial {
-  /* Arquitetura premium / abstração de luxo */
-  background-image: url('https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?q=80&w=2070&auto=format&fit=crop');
+  background-color: #020617;
+  background-image:
+    radial-gradient(circle at 18% 20%, rgba(13, 148, 136, 0.22), transparent 45%),
+    radial-gradient(circle at 82% 80%, rgba(30, 64, 175, 0.22), transparent 50%),
+    url('https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?q=80&w=2070&auto=format&fit=crop');
   background-size: cover;
   background-position: center;
-  background-attachment: fixed;
 }
 
 .glass-panel {
@@ -395,7 +423,7 @@ body {
 }
 
 .omie-module-card {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1), filter 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .omie-module-card:hover {

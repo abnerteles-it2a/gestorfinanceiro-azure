@@ -64,8 +64,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       icon: '📥',
       shortcut: 'E',
       perform: () => {
-        onNavigate('cashflow');
-        setTimeout(() => window.dispatchEvent(new CustomEvent('gestor_financeiro_import_statement')), 200);
+        onNavigate('financeAccounting');
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('gestor_financeiro_set_finance_tab', { detail: { tab: 'cashflow' } }));
+          window.dispatchEvent(new CustomEvent('gestor_financeiro_import_statement'));
+        }, 120);
       }
     },
     {
@@ -242,7 +245,10 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       category: 'Navegação',
       icon: '💸',
       shortcut: '3',
-      perform: () => onNavigate('cashflow')
+      perform: () => {
+        onNavigate('financeAccounting');
+        setTimeout(() => window.dispatchEvent(new CustomEvent('gestor_financeiro_set_finance_tab', { detail: { tab: 'cashflow' } })), 60);
+      }
     },
     {
       id: 'nav-investments',
@@ -393,17 +399,19 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[75vh] animate-scaleIn">
         {/* Search Input Bar */}
         <div className="flex items-center px-4 py-3.5 border-b border-slate-200 dark:border-slate-800 gap-3">
-          <span className="text-teal-600 dark:text-teal-400 font-black text-lg">⌘</span>
+          <span className="text-teal-600 dark:text-teal-400 font-black text-lg" aria-hidden="true">⌘</span>
           <input
             ref={inputRef}
             type="text"
+            aria-label="Buscar comando ou módulo"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="O que você deseja fazer? (ex: Nova Transação, DRE, Cotações...)"
+            placeholder="O que você deseja fazer? (ex: Nova Transação, DRE, Cotações…)"
             className="flex-1 bg-transparent text-sm sm:text-base font-medium text-slate-900 dark:text-white placeholder-slate-400 outline-none"
           />
           {query && (
             <button
+              type="button"
               onClick={() => setQuery('')}
               className="text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-white"
             >
@@ -416,10 +424,10 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         </div>
 
         {/* Results List */}
-        <div ref={listRef} className="overflow-y-auto p-2 divide-y divide-slate-100 dark:divide-slate-800/60">
+        <div ref={listRef} role="listbox" aria-label="Comandos disponíveis" className="overflow-y-auto overscroll-contain p-2 divide-y divide-slate-100 dark:divide-slate-800/60">
           {filteredCommands.length === 0 ? (
             <div className="p-8 text-center text-slate-400 text-sm">
-              Nenhuma ação encontrada para "{query}". Tente buscar por palavras como <em>transação</em>, <em>investimento</em> ou <em>relatórios</em>.
+              Nenhuma ação encontrada para “{query}”. Tente buscar por palavras como <em>transação</em>, <em>investimento</em> ou <em>relatórios</em>.
             </div>
           ) : (
             filteredCommands.map((cmd, idx) => {
@@ -427,12 +435,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               return (
                 <div
                   key={cmd.id}
+                  role="option"
+                  aria-selected={isSelected}
                   onClick={() => {
                     cmd.perform();
                     onClose();
                   }}
                   onMouseEnter={() => setSelectedIndex(idx)}
-                  className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer transition-all duration-150 ${
+                  className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer transition-colors duration-150 ${
                     isSelected
                       ? 'bg-teal-50 dark:bg-teal-950/40 text-teal-900 dark:text-teal-100 border border-teal-500/20'
                       : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50'

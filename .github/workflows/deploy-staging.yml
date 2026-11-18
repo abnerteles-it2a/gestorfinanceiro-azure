@@ -59,6 +59,19 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Setup Node.js for Migration
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Dependencies for Migration
+        run: npm ci --omit=dev --ignore-scripts
+
+      - name: Apply Additive Database Migrations (Staging)
+        continue-on-error: true
+        run: node scripts/migrate_financial_integrity.cjs --apply
+
       - name: Build & Push Image via Azure Container Registry (ACR)
         run: |
           az acr build \

@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useEffect, useId } from 'react';
 import { createPortal } from 'react-dom';
 
 interface ModalProps {
@@ -14,6 +14,20 @@ interface ModalProps {
 }
 
 export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, footer, size = 'md', zIndex = 50, variant = 'overlay' }) => {
+    const titleId = useId();
+
+    useEffect(() => {
+        if (!isOpen || variant === 'inline') return;
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                e.stopPropagation();
+                onClose();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isOpen, onClose, variant]);
+
     if (!isOpen) return null;
 
     const sizeClass = size === 'xl'
@@ -29,24 +43,29 @@ export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, 
     const card = (
         <div
             role="dialog"
-            aria-modal="true"
-            aria-labelledby="app-modal-title"
-            className={`modal bg-white rounded-2xl shadow-2xl w-full ${sizeClass} flex flex-col max-h-[90vh] animate-portal-enter`}
+            aria-modal={variant === 'overlay' ? 'true' : undefined}
+            aria-labelledby={titleId}
+            className={`modal bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-200/80 dark:border-slate-800 rounded-2xl shadow-2xl w-full ${sizeClass} flex flex-col max-h-[90vh] animate-portal-enter`}
             onClick={(e) => e.stopPropagation()}
         >
-            <div className="p-8 border-b border-slate-100 flex justify-between items-center shrink-0">
-                <h2 id="app-modal-title" className="text-2xl font-black text-[#0D9488] uppercase tracking-tight">{title}</h2>
-                <button onClick={onClose} aria-label="Fechar janela" className="text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-full hover:bg-slate-100">
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="p-6 sm:p-8 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center shrink-0">
+                <h2 id={titleId} className="text-xl sm:text-2xl font-black text-[#0D9488] uppercase tracking-tight">{title}</h2>
+                <button
+                    type="button"
+                    onClick={onClose}
+                    aria-label="Fechar janela"
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D9488]"
+                >
+                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                 </button>
             </div>
-            <div className="p-10 overflow-y-auto custom-scrollbar flex-1">
+            <div className="p-6 sm:p-10 overflow-y-auto overscroll-contain custom-scrollbar flex-1">
                 {children}
             </div>
             {footer && (
-                <div className="p-8 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-4 shrink-0">
+                <div className="p-6 sm:p-8 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50 flex justify-end gap-4 shrink-0">
                     {footer}
                 </div>
             )}
@@ -59,7 +78,7 @@ export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, 
 
     return createPortal(
         <div 
-            className="fixed inset-0 bg-[#020617]/40 backdrop-blur-sm flex justify-center items-center p-4 sm:p-6 animate-fade-in"
+            className="fixed inset-0 bg-[#020617]/60 backdrop-blur-sm flex justify-center items-center p-4 sm:p-6 animate-fade-in overscroll-contain"
             style={{ zIndex }}
             onClick={onClose}
         >
