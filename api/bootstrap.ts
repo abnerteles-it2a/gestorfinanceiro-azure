@@ -4,144 +4,153 @@ import { verifySession } from './_auth_shared';
 import { getPool } from './_db';
 import { financialSnapshot, financialTransactions, listTransactions, resolveFinancialScope } from './_financial';
 
-let isSchemaEnsured = false;
+let schemaEnsurePromise: Promise<void> | null = null;
+
+const BOOTSTRAP_SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS public.auth_users (
+    id uuid PRIMARY KEY,
+    email text UNIQUE NOT NULL,
+    password_hash text NOT NULL,
+    is_admin boolean DEFAULT false,
+    created_at timestamptz DEFAULT now()
+  );
+  ALTER TABLE public.auth_users
+    ADD COLUMN IF NOT EXISTS cpf_cnpj text,
+    ADD COLUMN IF NOT EXISTS is_admin boolean DEFAULT false,
+    ADD COLUMN IF NOT EXISTS email_verified boolean DEFAULT false,
+    ADD COLUMN IF NOT EXISTS verification_code text,
+    ADD COLUMN IF NOT EXISTS reset_token text,
+    ADD COLUMN IF NOT EXISTS reset_token_expires timestamptz;
+
+  CREATE TABLE IF NOT EXISTS public.investment_operations (
+    scope_type text NOT NULL CHECK (scope_type IN ('personal','org')),
+    scope_id uuid NOT NULL,
+    operation_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    request_payload jsonb NOT NULL,
+    result_payload jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (scope_type, scope_id, operation_id)
+  );
+  CREATE TABLE IF NOT EXISTS public.accounts (id uuid PRIMARY KEY, user_id uuid NOT NULL, name text NOT NULL, bank text, initial_balance numeric(14,2) DEFAULT 0, created_at timestamptz DEFAULT now());
+  CREATE TABLE IF NOT EXISTS public.categories (id uuid PRIMARY KEY, user_id uuid NOT NULL, name text NOT NULL, type text, icon text, created_at timestamptz DEFAULT now());
+  CREATE TABLE IF NOT EXISTS public.transactions (id uuid PRIMARY KEY, user_id uuid NOT NULL, date date NOT NULL, account_id uuid NOT NULL, to_account_id uuid, transaction_type text NOT NULL, category text NOT NULL, description text, amount numeric(14,2) NOT NULL, payment_method text, cost_center_id uuid, created_at timestamptz DEFAULT now());
+  CREATE TABLE IF NOT EXISTS public.investments (id uuid PRIMARY KEY, user_id uuid NOT NULL, type text, ticker text, quantity numeric(14,8), purchase_price numeric(14,2), purchase_date date, created_at timestamptz DEFAULT now());
+  CREATE TABLE IF NOT EXISTS public.fixed_income_investments (id uuid PRIMARY KEY, user_id uuid NOT NULL, name text, issuer text, amount_invested numeric(14,2), yield_rate text, purchase_date date, maturity_date date, created_at timestamptz DEFAULT now());
+  CREATE TABLE IF NOT EXISTS public.goals (id uuid PRIMARY KEY, user_id uuid NOT NULL, name text, target_amount numeric(14,2), current_amount numeric(14,2), color text, created_at timestamptz DEFAULT now());
+  CREATE TABLE IF NOT EXISTS public.recurrences (id uuid PRIMARY KEY, user_id uuid NOT NULL, label text, amount numeric(14,2), category text, account_id uuid, payment_method text, day_of_month integer, business_day_rule text, cost_center_id uuid, active boolean DEFAULT true, created_at timestamptz DEFAULT now());
+  CREATE TABLE IF NOT EXISTS public.cost_centers (id uuid PRIMARY KEY, user_id uuid NOT NULL, name text, created_at timestamptz DEFAULT now());
+  CREATE TABLE IF NOT EXISTS public.cost_center_permissions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL, cost_center_id uuid NOT NULL, role text, created_at timestamptz DEFAULT now());
+  CREATE TABLE IF NOT EXISTS public.org_invites (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, email text NOT NULL, role text NOT NULL, code text UNIQUE NOT NULL, expires_at timestamptz NOT NULL, created_at timestamptz DEFAULT now());
+
+  CREATE TABLE IF NOT EXISTS public.user_subscriptions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL,
+    provider text,
+    status text,
+    asaas_payment_id text,
+    asaas_subscription_id text,
+    period_start timestamptz,
+    period_end timestamptz,
+    created_at timestamptz DEFAULT now()
+  );
+  CREATE TABLE IF NOT EXISTS public.org_subscriptions (
+    org_id uuid PRIMARY KEY,
+    provider text,
+    status text,
+    asaas_payment_id text,
+    asaas_subscription_id text,
+    period_start timestamptz,
+    period_end timestamptz,
+    created_at timestamptz DEFAULT now()
+  );
+  ALTER TABLE public.user_subscriptions
+    ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS asaas_payment_id text,
+    ADD COLUMN IF NOT EXISTS asaas_subscription_id text,
+    ADD COLUMN IF NOT EXISTS billing_period text,
+    ADD COLUMN IF NOT EXISTS requested_tier text;
+  ALTER TABLE public.org_subscriptions
+    ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS asaas_payment_id text,
+    ADD COLUMN IF NOT EXISTS asaas_subscription_id text,
+    ADD COLUMN IF NOT EXISTS billing_period text,
+    ADD COLUMN IF NOT EXISTS requested_tier text,
+    ADD COLUMN IF NOT EXISTS pending_payment_id text,
+    ADD COLUMN IF NOT EXISTS pending_billing_period text,
+    ADD COLUMN IF NOT EXISTS pending_requested_tier text,
+    ADD COLUMN IF NOT EXISTS pending_period_start timestamptz,
+    ADD COLUMN IF NOT EXISTS pending_period_end timestamptz;
+
+  ALTER TABLE public.transactions
+    ADD COLUMN IF NOT EXISTS is_business_revenue boolean DEFAULT false,
+    ADD COLUMN IF NOT EXISTS is_business_expense boolean DEFAULT false,
+    ADD COLUMN IF NOT EXISTS org_id uuid;
+  ALTER TABLE public.accounts ADD COLUMN IF NOT EXISTS org_id uuid;
+  ALTER TABLE public.categories
+    ADD COLUMN IF NOT EXISTS mei_category text,
+    ADD COLUMN IF NOT EXISTS org_id uuid;
+  ALTER TABLE public.investments ADD COLUMN IF NOT EXISTS org_id uuid;
+  ALTER TABLE public.fixed_income_investments ADD COLUMN IF NOT EXISTS org_id uuid;
+  ALTER TABLE public.goals ADD COLUMN IF NOT EXISTS org_id uuid;
+  ALTER TABLE public.recurrences ADD COLUMN IF NOT EXISTS org_id uuid;
+  ALTER TABLE public.cost_centers ADD COLUMN IF NOT EXISTS org_id uuid;
+
+  CREATE TABLE IF NOT EXISTS public.profiles (user_id uuid PRIMARY KEY, org_id uuid, plan_id uuid, is_admin boolean DEFAULT false, preferences jsonb DEFAULT '{}', created_at timestamptz DEFAULT now());
+  ALTER TABLE public.profiles
+    ADD COLUMN IF NOT EXISTS is_admin boolean DEFAULT false,
+    ADD COLUMN IF NOT EXISTS preferences jsonb DEFAULT '{}',
+    ADD COLUMN IF NOT EXISTS full_name text,
+    ADD COLUMN IF NOT EXISTS document text,
+    ADD COLUMN IF NOT EXISTS business_profile text,
+    ADD COLUMN IF NOT EXISTS asaas_customer_id text,
+    ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+
+  CREATE TABLE IF NOT EXISTS public.obligation_settlements (operation_id uuid PRIMARY KEY, obligation_id uuid NOT NULL, kind text NOT NULL CHECK (kind IN ('payable','receivable')), principal_amount numeric(14,2) NOT NULL, cash_amount numeric(14,2) NOT NULL, account_id uuid NOT NULL, transaction_id uuid NOT NULL UNIQUE, created_at timestamptz NOT NULL DEFAULT now());
+  CREATE TABLE IF NOT EXISTS public.obligation_creation_operations (scope_type text NOT NULL CHECK (scope_type IN ('personal','org')), scope_id uuid NOT NULL, operation_id uuid NOT NULL, user_id uuid NOT NULL, request_payload jsonb NOT NULL, result_payload jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (scope_type, scope_id, operation_id));
+  CREATE TABLE IF NOT EXISTS public.billing_payments (payment_id text PRIMARY KEY, sequence_id bigserial UNIQUE NOT NULL, scope_key text NOT NULL, user_id uuid NOT NULL, org_id uuid, tier text NOT NULL CHECK (tier IN ('starter', 'plus', 'pro')), billing_period text NOT NULL CHECK (billing_period IN ('monthly', 'yearly')), state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'overdue', 'failed', 'applied', 'superseded')), created_at timestamptz NOT NULL DEFAULT now(), applied_at timestamptz);
+  CREATE INDEX IF NOT EXISTS billing_payments_scope_sequence_idx ON public.billing_payments (scope_key, sequence_id);
+
+  ALTER TABLE public.payables
+    ADD COLUMN IF NOT EXISTS paid_amount numeric(14,2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS transaction_id uuid,
+    ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS is_business_revenue boolean NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS is_business_expense boolean NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS issue_date date,
+    ADD COLUMN IF NOT EXISTS supplier text;
+  ALTER TABLE public.receivables
+    ADD COLUMN IF NOT EXISTS received_amount numeric(14,2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS transaction_id uuid,
+    ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS is_business_revenue boolean NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS is_business_expense boolean NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS issue_date date,
+    ADD COLUMN IF NOT EXISTS customer text;
+
+  CREATE TABLE IF NOT EXISTS public.organizations (id uuid PRIMARY KEY, name text, seats int, plan_id uuid, created_at timestamptz DEFAULT now());
+  CREATE TABLE IF NOT EXISTS public.plans (id uuid PRIMARY KEY, name text, tier text, created_at timestamptz DEFAULT now());
+
+  CREATE INDEX IF NOT EXISTS idx_tx_user_date ON public.transactions(user_id, date DESC);
+  CREATE INDEX IF NOT EXISTS idx_tx_acc ON public.transactions(account_id);
+  CREATE INDEX IF NOT EXISTS idx_tx_to_acc ON public.transactions(to_account_id);
+  CREATE INDEX IF NOT EXISTS idx_tx_org_date ON public.transactions(org_id, date DESC);
+  CREATE INDEX IF NOT EXISTS idx_sessions_user_jti ON public.auth_sessions(user_id, jti);
+  CREATE INDEX IF NOT EXISTS idx_payables_user_status ON public.payables(user_id, status);
+  CREATE INDEX IF NOT EXISTS idx_receivables_user_status ON public.receivables(user_id, status);
+  CREATE INDEX IF NOT EXISTS idx_usage_ledger ON public.usage_tx_ledger(scope_type, scope_id, yyyymm);
+`;
 
 export async function ensureSchemaOnce(db: Pool) {
-  if (isSchemaEnsured) return;
-  isSchemaEnsured = true;
-  try {
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS public.auth_users (
-        id uuid PRIMARY KEY,
-        email text UNIQUE NOT NULL,
-        password_hash text NOT NULL,
-        is_admin boolean DEFAULT false,
-        created_at timestamptz DEFAULT now()
-      )
-    `);
-    const columnsAuth = [
-      { name: 'cpf_cnpj', type: 'text' },
-      { name: 'is_admin', type: 'boolean', default: 'false' },
-      { name: 'email_verified', type: 'boolean', default: 'false' },
-      { name: 'verification_code', type: 'text' },
-      { name: 'reset_token', type: 'text' },
-      { name: 'reset_token_expires', type: 'timestamptz' }
-    ];
-    for (const col of columnsAuth) {
-      try {
-        await db.query(`ALTER TABLE public.auth_users ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}${col.default ? ` DEFAULT ${col.default}` : ''}`);
-      } catch {}
+  if (schemaEnsurePromise) return schemaEnsurePromise;
+  schemaEnsurePromise = (async () => {
+    try {
+      await db.query(BOOTSTRAP_SCHEMA_SQL);
+    } catch (err: any) {
+      console.warn('Bootstrap: ensureSchemaOnce non-fatal warning:', err?.message);
     }
-
-    await db.query("create table if not exists public.investment_operations (scope_type text not null check (scope_type in ('personal','org')), scope_id uuid not null, operation_id uuid not null, user_id uuid not null, request_payload jsonb not null, result_payload jsonb not null, created_at timestamptz not null default now(), primary key (scope_type,scope_id,operation_id))");
-    await db.query('create table if not exists public.accounts (id uuid primary key, user_id uuid not null, name text not null, bank text, initial_balance numeric(14,2) default 0, created_at timestamptz default now())');
-    await db.query('create table if not exists public.categories (id uuid primary key, user_id uuid not null, name text not null, type text, icon text, created_at timestamptz default now())');
-    await db.query('create table if not exists public.transactions (id uuid primary key, user_id uuid not null, date date not null, account_id uuid not null, to_account_id uuid, transaction_type text not null, category text not null, description text, amount numeric(14,2) not null, payment_method text, cost_center_id uuid, created_at timestamptz default now())');
-    await db.query('create table if not exists public.investments (id uuid primary key, user_id uuid not null, type text, ticker text, quantity numeric(14,8), purchase_price numeric(14,2), purchase_date date, created_at timestamptz default now())');
-    await db.query('create table if not exists public.fixed_income_investments (id uuid primary key, user_id uuid not null, name text, issuer text, amount_invested numeric(14,2), yield_rate text, purchase_date date, maturity_date date, created_at timestamptz default now())');
-    await db.query('create table if not exists public.goals (id uuid primary key, user_id uuid not null, name text, target_amount numeric(14,2), current_amount numeric(14,2), color text, created_at timestamptz default now())');
-    await db.query('create table if not exists public.recurrences (id uuid primary key, user_id uuid not null, label text, amount numeric(14,2), category text, account_id uuid, payment_method text, day_of_month integer, business_day_rule text, cost_center_id uuid, active boolean default true, created_at timestamptz default now())');
-    await db.query('create table if not exists public.cost_centers (id uuid primary key, user_id uuid not null, name text, created_at timestamptz default now())');
-    await db.query('create table if not exists public.cost_center_permissions (id uuid primary key default gen_random_uuid(), user_id uuid not null, cost_center_id uuid not null, role text, created_at timestamptz default now())');
-    await db.query('create table if not exists public.org_invites (id uuid primary key default gen_random_uuid(), org_id uuid not null, email text not null, role text not null, code text unique not null, expires_at timestamptz not null, created_at timestamptz default now())');
-
-    await db.query(`create table if not exists public.user_subscriptions (
-      id uuid primary key default gen_random_uuid(), 
-      user_id uuid not null, 
-      provider text, 
-      status text, 
-      asaas_payment_id text,
-      asaas_subscription_id text,
-      period_start timestamptz, 
-      period_end timestamptz, 
-      created_at timestamptz default now()
-    )`);
-    await db.query(`create table if not exists public.org_subscriptions (
-      org_id uuid primary key, 
-      provider text, 
-      status text, 
-      asaas_payment_id text,
-      asaas_subscription_id text,
-      period_start timestamptz, 
-      period_end timestamptz, 
-      created_at timestamptz default now()
-    )`);
-
-    const subCols = [
-      'created_at timestamptz default now()',
-      'asaas_payment_id text',
-      'asaas_subscription_id text',
-      'billing_period text',
-      'requested_tier text'
-    ];
-    for (const colDef of subCols) {
-      try { await db.query(`alter table public.user_subscriptions add column if not exists ${colDef}`); } catch {}
-      try { await db.query(`alter table public.org_subscriptions add column if not exists ${colDef}`); } catch {}
-    }
-
-    try { await db.query('alter table public.transactions add column if not exists is_business_revenue boolean default false'); } catch {}
-    try { await db.query('alter table public.transactions add column if not exists is_business_expense boolean default false'); } catch {}
-    try { await db.query('alter table public.transactions add column if not exists org_id uuid'); } catch {}
-    try { await db.query('alter table public.accounts add column if not exists org_id uuid'); } catch {}
-    try { await db.query('alter table public.categories add column if not exists mei_category text'); } catch {}
-    try { await db.query('alter table public.categories add column if not exists org_id uuid'); } catch {}
-    try { await db.query('alter table public.investments add column if not exists org_id uuid'); } catch {}
-    try { await db.query('alter table public.fixed_income_investments add column if not exists org_id uuid'); } catch {}
-    try { await db.query('alter table public.goals add column if not exists org_id uuid'); } catch {}
-    try { await db.query('alter table public.recurrences add column if not exists org_id uuid'); } catch {}
-    try { await db.query('alter table public.cost_centers add column if not exists org_id uuid'); } catch {}
-
-    await db.query(`create table if not exists public.profiles (user_id uuid primary key, org_id uuid, plan_id uuid, is_admin boolean default false, preferences jsonb default '{}', created_at timestamptz default now())`);
-    const profileCols = [
-      'is_admin boolean default false',
-      'preferences jsonb default \'{}\'',
-      'full_name text',
-      'document text',
-      'business_profile text',
-      'asaas_customer_id text',
-      'created_at timestamptz default now()'
-    ];
-    for (const colDef of profileCols) {
-      try { await db.query(`alter table public.profiles add column if not exists ${colDef}`); } catch {}
-    }
-    
-    await db.query(`create table if not exists public.obligation_settlements (operation_id uuid primary key, obligation_id uuid not null, kind text not null check (kind in ('payable','receivable')), principal_amount numeric(14,2) not null, cash_amount numeric(14,2) not null, account_id uuid not null, transaction_id uuid not null unique, created_at timestamptz not null default now())`);
-    await db.query(`create table if not exists public.obligation_creation_operations (scope_type text not null check (scope_type in ('personal','org')), scope_id uuid not null, operation_id uuid not null, user_id uuid not null, request_payload jsonb not null, result_payload jsonb not null, created_at timestamptz not null default now(), primary key (scope_type, scope_id, operation_id))`);
-    await db.query(`create table if not exists public.billing_payments (payment_id text primary key, sequence_id bigserial unique not null, scope_key text not null, user_id uuid not null, org_id uuid, tier text not null check (tier in ('starter', 'plus', 'pro')), billing_period text not null check (billing_period in ('monthly', 'yearly')), state text not null default 'pending' check (state in ('pending', 'overdue', 'failed', 'applied', 'superseded')), created_at timestamptz not null default now(), applied_at timestamptz)`);
-    try { await db.query(`create index if not exists billing_payments_scope_sequence_idx on public.billing_payments (scope_key, sequence_id)`); } catch {}
-    for (const [table,column] of [['payables','paid_amount'],['receivables','received_amount']]) {
-      await db.query(`alter table public.${table} add column if not exists ${column} numeric(14,2) default 0`);
-      await db.query(`alter table public.${table} add column if not exists transaction_id uuid`);
-      await db.query(`alter table public.${table} add column if not exists updated_at timestamptz default now()`);
-      await db.query(`alter table public.${table} add column if not exists is_business_revenue boolean not null default false`);
-      await db.query(`alter table public.${table} add column if not exists is_business_expense boolean not null default false`);
-      await db.query(`alter table public.${table} add column if not exists issue_date date`);
-    }
-    try { await db.query(`alter table public.payables add column if not exists supplier text`); } catch {}
-    try { await db.query(`alter table public.receivables add column if not exists customer text`); } catch {}
-    for (const pendingCol of ['pending_payment_id text', 'pending_billing_period text', 'pending_requested_tier text', 'pending_period_start timestamptz', 'pending_period_end timestamptz']) {
-      try { await db.query(`alter table public.org_subscriptions add column if not exists ${pendingCol}`); } catch {}
-    }
-    await db.query(`create table if not exists public.organizations (id uuid primary key, name text, seats int, plan_id uuid, created_at timestamptz default now())`);
-    await db.query(`create table if not exists public.plans (id uuid primary key, name text, tier text, created_at timestamptz default now())`);
-
-    // High-performance query indexes
-    const indexes = [
-      'CREATE INDEX IF NOT EXISTS idx_tx_user_date ON public.transactions(user_id, date DESC)',
-      'CREATE INDEX IF NOT EXISTS idx_tx_acc ON public.transactions(account_id)',
-      'CREATE INDEX IF NOT EXISTS idx_tx_to_acc ON public.transactions(to_account_id)',
-      'CREATE INDEX IF NOT EXISTS idx_tx_org_date ON public.transactions(org_id, date DESC)',
-      'CREATE INDEX IF NOT EXISTS idx_sessions_user_jti ON public.auth_sessions(user_id, jti)',
-      'CREATE INDEX IF NOT EXISTS idx_payables_user_status ON public.payables(user_id, status)',
-      'CREATE INDEX IF NOT EXISTS idx_receivables_user_status ON public.receivables(user_id, status)',
-      'CREATE INDEX IF NOT EXISTS idx_usage_ledger ON public.usage_tx_ledger(scope_type, scope_id, yyyymm)'
-    ];
-    for (const idxSql of indexes) {
-      try { await db.query(idxSql); } catch {}
-    }
-  } catch (err: any) {
-    console.warn('Bootstrap: ensureSchemaOnce non-fatal warning:', err?.message);
-  }
+  })();
+  return schemaEnsurePromise;
 }
 
 const isNoDb = (): boolean => !process.env.NEON_DATABASE_URL && !process.env.DATABASE_URL;
@@ -150,7 +159,7 @@ export default async function handler(req: any, res: any) {
   try {
     const url = new URL(req.url, 'http://localhost');
     const includeEnv = (url.searchParams.get('env') === '1') || (String(process.env.ENABLE_ENV_CHECK || '') === '1');
-    
+
     // Check for NoDB mode first
     if (isNoDb()) {
        res.statusCode = 200;
@@ -160,20 +169,20 @@ export default async function handler(req: any, res: any) {
     }
 
     // 2. Auth Check (Enforcing Single-Session Compliance)
-    const result = await verifySession(req, res, getPool());
+    const db = getPool();
+    const result = await verifySession(req, res, db);
     if (!result) return;
     const { userId } = result;
-    
-    const db = getPool();
-    try { await db.query('select 1'); } catch (e: any) { res.statusCode = 500; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ error: e?.message || 'db_unavailable' })); return; }
-    
-    // Ensure Core Schema once per process lifecycle to prevent catalog lock contention & multi-second delays on every request
+
+    // Ensure Core Schema once per process lifecycle (single batched round-trip)
     await ensureSchemaOnce(db);
 
-    // 1. Fetch Profile & Org Context First
-    const profileRes = await db.query('select org_id, plan_id, is_admin, preferences, business_profile from public.profiles where user_id=$1', [userId]);
+    // 1. Fetch Profile & Financial Scope in parallel
+    const [profileRes, financialScope] = await Promise.all([
+      db.query('select org_id, plan_id, is_admin, preferences, business_profile from public.profiles where user_id=$1', [userId]),
+      resolveFinancialScope(db, userId, req.headers['x-view-mode']),
+    ]);
     const profile = profileRes.rows[0] || null;
-    const financialScope = await resolveFinancialScope(db,userId,req.headers['x-view-mode']);
     const orgId = financialScope.orgId;
     const userOrgId: string | null = profile?.org_id || null;
     let role = financialScope.role;
@@ -190,16 +199,16 @@ export default async function handler(req: any, res: any) {
     let commonFilter = ''; // Categories, Recurrences, Cost Centers
     let transactionFilter = '';
     let investmentFilter = ''; // Investments, Goals
-    
+
     if (orgId) {
         // ORG VIEW: Strict separation
-        // Use literal value to avoid parameter mapping issues in complex queries, 
+        // Use literal value to avoid parameter mapping issues in complex queries,
         // but ensure it's safe (orgId comes from trusted payload/db).
         const orgFilter = `org_id = '${orgId}'`;
         accountsFilter = orgFilter;
         commonFilter = orgFilter;
         transactionFilter = orgFilter;
-        investmentFilter = orgFilter; 
+        investmentFilter = orgFilter;
     } else {
         // PERSONAL VIEW: Private/Single (includes historical data)
         const personalFilter = 'user_id=$1 and org_id is null';
@@ -207,27 +216,27 @@ export default async function handler(req: any, res: any) {
         commonFilter = personalFilter;
         transactionFilter = personalFilter;
         // Investments/Goals isolated to personal scope
-        investmentFilter = personalFilter; 
+        investmentFilter = personalFilter;
     }
 
     // 3. Permission Filters (for Members)
     let transactionCCFilter = '';
     let costCenterFilter = ''; // For the list of Cost Centers
-    
+
     if (orgId && role === 'member') {
         // Filter Transactions
         if (allowedCCs.length > 0) {
             const ccList = allowedCCs.map(id => `'${id}'`).join(',');
             // Show transactions with Allowed CC OR No CC (assuming No CC is general/visible)
             transactionCCFilter = ` AND cost_center_id IN (${ccList})`;
-            
+
             // Filter Cost Centers List
             costCenterFilter = ` AND id IN (${ccList})`;
         } else {
             // No allowed CCs? Only show No-CC transactions?
             transactionCCFilter = ` AND 1=0`;
             // No Cost Centers visible
-            costCenterFilter = ` AND 1=0`; 
+            costCenterFilter = ` AND 1=0`;
         }
     }
 
@@ -256,33 +265,33 @@ export default async function handler(req: any, res: any) {
     const results = await Promise.all([
       // 0: Accounts
       db.query(`
-        SELECT 
+        SELECT
             a.id, a.name, a.bank, a.initial_balance,
             (
-                SELECT COALESCE(SUM(CAST(amount AS numeric)), 0) 
-                FROM public.transactions 
+                SELECT COALESCE(SUM(CAST(amount AS numeric)), 0)
+                FROM public.transactions
                 WHERE account_id = a.id AND LOWER(transaction_type) IN ('entrada', 'income', 'receita')
                 ${transactionCCFilter}
             ) as total_in,
             (
-                SELECT COALESCE(SUM(CAST(amount AS numeric)), 0) 
-                FROM public.transactions 
+                SELECT COALESCE(SUM(CAST(amount AS numeric)), 0)
+                FROM public.transactions
                 WHERE to_account_id = a.id AND LOWER(transaction_type) IN ('transferência', 'transferencia', 'transfer')
                 ${transactionCCFilter}
             ) as total_transfer_in,
             (
-                SELECT COALESCE(SUM(CAST(amount AS numeric)), 0) 
-                FROM public.transactions 
+                SELECT COALESCE(SUM(CAST(amount AS numeric)), 0)
+                FROM public.transactions
                 WHERE account_id = a.id AND LOWER(transaction_type) IN ('saída', 'saida', 'expense', 'despesa')
                 ${transactionCCFilter}
             ) as total_out,
             (
-                SELECT COALESCE(SUM(CAST(amount AS numeric)), 0) 
-                FROM public.transactions 
+                SELECT COALESCE(SUM(CAST(amount AS numeric)), 0)
+                FROM public.transactions
                 WHERE account_id = a.id AND LOWER(transaction_type) IN ('transferência', 'transferencia', 'transfer')
                 ${transactionCCFilter}
             ) as total_transfer_out
-        FROM public.accounts a 
+        FROM public.accounts a
         WHERE ${accountsFilter}
         ORDER BY a.name ASC
       `, mainParams),
@@ -302,31 +311,13 @@ export default async function handler(req: any, res: any) {
       db.query(`select id,name,org_id from public.cost_centers where ${commonFilter} ${costCenterFilter}`, mainParams),
       // 8: Subscription
       db.query(subsQuery.sql, subsQuery.params),
-      // 9: Profile preferences (for isMei etc)
-      db.query('select preferences from public.profiles where user_id=$1', [userId]),
-      // 10: Monthly Summary
-      db.query(`
-        select transaction_type, sum(CAST(amount as numeric)) as total 
-        from public.transactions 
-        where date >= to_date(to_char(current_date, 'YYYY-MM') || '-01', 'YYYY-MM-DD')
-        and date < (date_trunc('month', current_date) + interval '1 month')::date
-        and ${transactionFilter}
-        ${transactionCCFilter}
-        group by transaction_type`, mainParams),
-      // 11: Complete authorized ledger for reports/MEI/analytics, separate from the UI page.
-      financialTransactions(db,financialScope)
+      // 9: Snapshot (period & account balances)
+      financialSnapshot(db, financialScope),
+      // 10: Complete authorized ledger for reports/MEI/analytics, separate from the UI page.
+      financialTransactions(db, financialScope)
     ]);
 
-    // 3.5 Calculate Monthly Summary & Context
-    let monthIncome = 0;
-    let monthExpense = 0;
-    results[10].rows.forEach((row: any) => {
-        const type = String(row.transaction_type || '').toLowerCase();
-        const val = Number(row.total) || 0;
-        if (['entrada', 'income', 'receita'].includes(type)) monthIncome += val;
-        if (['saída', 'saida', 'expense', 'despesa'].includes(type)) monthExpense += val;
-    });
-    const snapshot = await financialSnapshot(db,financialScope);
+    const snapshot = results[9] as any;
     const monthly_summary = { income: snapshot.period.income, expense: snapshot.period.expense };
 
     let organization: any = null;
@@ -445,7 +436,7 @@ export default async function handler(req: any, res: any) {
     const graceEnd = periodEnd ? new Date(periodEnd.getTime() + 7 * 24 * 60 * 60 * 1000) : null;
     const isInsideGrace = !!(isExpired && graceEnd && graceEnd > now);
     const isTotalBlocked = !!(isExpired && !isInsideGrace);
-    
+
     const gracePeriodDays = isInsideGrace ? Math.ceil((graceEnd.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)) : 0;
     const trialDaysRemaining = (isTrial && periodEnd && !isExpired)
         ? Math.max(0, Math.ceil((periodEnd.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)))
@@ -464,7 +455,7 @@ export default async function handler(req: any, res: any) {
     } else if (effectiveTier === 'pro') {
         if (effectiveProfile === 'mei') effectiveProfile = 'empresa';
     }
-    
+
     // 6. Force PRO capabilities during Trial, but keep profile as PF for safety
     let forcedTier = effectiveTier;
     if (isTrial && !isExpired) {
@@ -489,21 +480,21 @@ export default async function handler(req: any, res: any) {
     // 7. Usage & Quota Calculation
     const nowUtc = new Date();
     const yyyymm = `${nowUtc.getFullYear()}-${String(nowUtc.getMonth() + 1).padStart(2, '0')}`;
-    
+
     const usageQueries = await Promise.all([
         db.query(`
-            select count(*)::int as tx_used 
-            from public.usage_tx_ledger 
+            select count(*)::int as tx_used
+            from public.usage_tx_ledger
             where (
-                (scope_type='user' and scope_id=$1) 
+                (scope_type='user' and scope_id=$1)
                 OR (scope_type='org' and scope_id=$2)
             ) and yyyymm=$3
         `, [userId, userOrgId || '00000000-0000-0000-0000-000000000000', yyyymm]),
         db.query(`select coalesce(sum(size), 0)::bigint as storage_used from public.fiscal_documents where ${orgId ? 'org_id=$1' : 'user_id=$1'}`, [scopeId])
     ]);
-    
-    const usage = { 
-        yyyymm, 
+
+    const usage = {
+        yyyymm,
         transactionsUsed: Number(usageQueries[0].rows[0]?.tx_used || 0),
         transactionsLimit: planLimits.transactionsPerMonth,
         storageUsed: Number(usageQueries[1].rows[0]?.storage_used || 0),
@@ -530,9 +521,9 @@ export default async function handler(req: any, res: any) {
         const isPro = forcedTier === 'pro';
         const isMeiProfile = effectiveProfile === 'mei';
         const isPlus = forcedTier === 'plus' || isPro;
-        
+
         return {
-            investments: isPlus || isTrial, 
+            investments: isPlus || isTrial,
             financeAccounting: isPlus || isMeiProfile || isTrial,
             docsVault: true,
             reports: true,
@@ -542,13 +533,13 @@ export default async function handler(req: any, res: any) {
         };
     })();
 
-    const entitlements = { 
-        segment: effectiveProfile, 
-        scope: { type: scopeType, id: scopeId }, 
-        limits: planLimits, 
-        modules 
+    const entitlements = {
+        segment: effectiveProfile,
+        scope: { type: scopeType, id: scopeId },
+        limits: planLimits,
+        modules
     };
-    
+
     const capabilities = {
         canAccessInvestments: !!modules.investments,
         canAccessFinance: !!modules.financeAccounting,
@@ -579,30 +570,30 @@ export default async function handler(req: any, res: any) {
     res.statusCode = 200;
     res.setHeader('content-type','application/json');
     try { res.setHeader('cache-control','private, no-store'); } catch {}
-    res.end(JSON.stringify({ 
-      accounts: results[0].rows, 
-      categories: results[1].rows, 
+    res.end(JSON.stringify({
+      accounts: results[0].rows,
+      categories: results[1].rows,
       transactions: results[2].rows,
-      financial_transactions: results[11].rows,
+      financial_transactions: results[10].rows,
       transactions_meta: {hasMore:(results[2] as any).hasMore,nextCursor:(results[2] as any).nextCursor},
       financial_snapshot: snapshot,
-      investments: results[3].rows, 
-      fixed_income_investments: results[4].rows, 
-      goals: results[5].rows, 
-      recurrences: results[6].rows, 
-      cost_centers: results[7].rows, 
-      profile: finalProfile, 
-      organization, 
-      plan: finalPlan, 
-      subscription: enrichedSubscription, 
-      monthly_summary, 
-      org_role: role, 
-      permissions, 
-      capabilities, 
-      entitlements, 
-      usage, 
+      investments: results[3].rows,
+      fixed_income_investments: results[4].rows,
+      goals: results[5].rows,
+      recurrences: results[6].rows,
+      cost_centers: results[7].rows,
+      profile: finalProfile,
+      organization,
+      plan: finalPlan,
+      subscription: enrichedSubscription,
+      monthly_summary,
+      org_role: role,
+      permissions,
+      capabilities,
+      entitlements,
+      usage,
       status,
-      business_profile: effectiveProfile 
+      business_profile: effectiveProfile
     }));
 
   } catch (e: any) {

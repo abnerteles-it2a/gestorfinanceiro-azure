@@ -50,7 +50,7 @@ const SidebarNav: React.FC<{ collapsed: boolean; setCollapsed: (v: boolean) => v
     const canInvestments = entitlements?.modules?.investments ?? capabilities?.canAccessInvestments ?? true;
     const canFinanceAccounting = entitlements?.modules?.financeAccounting ?? capabilities?.canAccessFinance ?? true;
     const canDocsVault = entitlements?.modules?.docsVault ?? capabilities?.canAccessDocs ?? true;
-    
+
     const navBtnClass = (view: ActiveView) => {
         if (collapsed) return `omie-sidebar-item`;
         return `w-full h-10 flex items-center px-3 gap-3 rounded-lg transition-all text-sm font-medium relative group ${activeView === view ? 'bg-[#0D9488]/15 text-white shadow-sm' : 'text-slate-400 hover:bg-slate-800/50 hover:text-white'}`;
@@ -149,7 +149,7 @@ const SidebarNav: React.FC<{ collapsed: boolean; setCollapsed: (v: boolean) => v
                         <CalendarWidget isSidebar={true} />
                     </div>
                 )}
-                
+
                 <button type="button" onClick={() => setActiveView('support')} className={navBtnClass('support')} style={activeStyle('support')} aria-label="Ajuda e Suporte" title="Ajuda & Suporte">
                     <HelpCircleIcon className="h-5 w-5 shrink-0" aria-hidden="true" />
                     {!collapsed && <span className="whitespace-nowrap">Ajuda & Suporte</span>}
@@ -186,7 +186,16 @@ const AppContent: React.FC = () => {
     const [showWelcome, setShowWelcome] = useState(false);
 
     useEffect(() => {
-        if (user) setActiveView('home');
+        if (user) {
+            setActiveView('home');
+            const timer = setTimeout(() => {
+                void import('./components/Dashboard');
+                void import('./components/FinanceAccounting');
+                void import('./components/Investments');
+                void import('./components/Reports');
+            }, 500);
+            return () => clearTimeout(timer);
+        }
     }, [user]);
 
     useEffect(() => {
@@ -231,10 +240,10 @@ const AppContent: React.FC = () => {
             window.removeEventListener('resize', handler);
         };
     }, [sidebarManual]);
-    
-    
 
-    
+
+
+
     const handleSetActiveView = (newView: ActiveView) => {
         if (newView === 'cashflow') {
             setFinanceSubTab('cashflow');

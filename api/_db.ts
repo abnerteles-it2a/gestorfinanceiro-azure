@@ -19,13 +19,13 @@ export const getPool = (): Pool => {
   }
 
   const rawConnectionString = process.env.NEON_DATABASE_URL || process.env.DATABASE_URL;
-  const connectionString = rawConnectionString 
-    ? rawConnectionString.replace('?sslmode=require', '') 
+  const connectionString = rawConnectionString
+    ? rawConnectionString.replace('?sslmode=require', '')
     : rawConnectionString;
 
   pool = new Pool({
     connectionString,
-    max: 10,
+    max: 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
     ssl: { rejectUnauthorized: false }
