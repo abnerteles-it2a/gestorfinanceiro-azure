@@ -43,6 +43,23 @@ Após as correções, a [integração PostgreSQL](api/_premiumPostgres.integrati
 
 O Chromium local também executou a aplicação compilada real com HTTP controlado: **6 cenários / 38 verificações aprovadas**, cobrindo cartão vencido, erro e retry nos dois escopos, MEI completo além de 100 movimentos e valuation com unit/zero/prejuízo. Não houve erros de página; requisições externas foram bloqueadas e erros HTTP foram injetados deliberadamente. Browser e servidor foram encerrados. Não é E2E integrado ao PostgreSQL nem validação do staging. Após essa execução, uma afirmação residual de dados “100% B3/CVM” foi substituída por aviso correto de procedência; 17 testes direcionados e typecheck passaram após o ajuste textual.
 
+### Auditoria UI/UX, Otimização de Performance, Build APK e Deploy Staging — 18/11/2026
+
+Na revisão e evolução de 18/11/2026 (commits `fcea649` e `57ffbef` publicados na branch `staging` e implantados em `ca-gestor-staging`):
+- **Design System & Web Interface Guidelines**:
+  - Corrigida invisibilidade de erros em [FormField](components/ui/Forms/FormField.tsx) (`opacity-0` órfão removido e `role="alert"` adicionado).
+  - Suporte completo a Dark Mode aplicado ao [Modal](components/shared/Modal.tsx) (com fechamento por `Escape`, `useId()` e `overscroll-contain`), [DataTable](components/ui/DataTable.tsx) (com `aria-sort` e navegação por teclado), [Select](components/ui/Forms/Select.tsx) e classes `.omie-*` em [index.css](index.css).
+  - Unificação visual dos componentes legados ([LoginGate](components/LoginGate.tsx), [GoalsWidget](components/GoalsWidget.tsx), [CategoryBudgetsWidget](components/CategoryBudgetsWidget.tsx), [RecentTransactionsWidget](components/RecentTransactionsWidget.tsx), [AccountsList](components/AccountsList.tsx), [TransactionItem](components/TransactionItem.tsx)) para a paleta enterprise `slate/teal` e integração do [DailyExecutiveBriefing](components/DailyExecutiveBriefing.tsx) no [Dashboard](components/Dashboard.tsx).
+  - Corrigida rota morta `'cashflow'` no [CommandPalette](components/CommandPalette.tsx) e em [App.tsx](App.tsx); removida a barra mobile duplicada em [Header.tsx](components/Header.tsx); substituídos diálogos bloqueantes em [MeiMonthlyClosingPanel](components/MeiMonthlyClosingPanel.tsx) por confirmação inline; removidos o loop `debugger` de [useSecurity.ts](hooks/useSecurity.ts) e a simulação aleatória de cotações (`Math.random()`) de [MarketRankWidget.tsx](components/MarketRankWidget.tsx).
+- **Build, Dependências e Performance de Inicialização (`/api/bootstrap`)**:
+  - Restritas as fontes do Tailwind v4 em [index.css](index.css) (`@import "tailwindcss" source(none);` + `@source`), eliminando em definitivo o aviso CSS `.\[file\:line\]{file:line}`.
+  - Corrigido o chunk `react-vendor` em [vite.config.ts](vite.config.ts) (`194.27 kB`) e reduzido o bundle principal `index.js` de `605 kB` para `398 kB` (-34%), com prefetch automático dos módulos principais em [App.tsx](App.tsx).
+  - `npm audit fix` executado na raiz: **0 vulnerabilidades**.
+  - `ensureSchemaOnce` em [api/bootstrap.ts](api/bootstrap.ts) consolidado de 68 queries sequenciais (~9s cross-region `eastus2` ↔ `brazilsouth`) para **1 único bloco SQL (`BOOTSTRAP_SCHEMA_SQL`)** compartilhado via `schemaEnsurePromise`, além de paralelização de `profiles`, `resolveFinancialScope` e `financialSnapshot` e ajuste do pool em [api/_db.ts](api/_db.ts) para `max: 20`.
+- **Mobile APK & Deploy Azure**:
+  - Novo APK de release compilado via Gradle (`assembleRelease`) e atualizado em [mobile/gestor-financeiro.apk](mobile/gestor-financeiro.apk) (`75,82 MB`).
+  - Deploy concluído via GitHub Actions OIDC ([deploy-staging.yml](.github/workflows/deploy-staging.yml), Runs #18 e #19) no Azure Container Apps (`ca-gestor-staging`).
+
 ### Evolução recomendada para SaaS premium
 
 1. **Confiabilidade antes de novas funcionalidades**: resolver as lacunas acima e adicionar regressões nos fluxos reais, não apenas em helpers.

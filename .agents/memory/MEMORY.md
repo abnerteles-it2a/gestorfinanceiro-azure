@@ -6,3 +6,4 @@
 - [project] Component metadata uses SemVer while toolkit releases use CalVer → tech-decisions.md
 - [product] Gestor Financeiro Cloud-Native Azure: Investimentos Inteligentes, Foundry AI e ACS Email → product-roadmap.md
 - [mobile] App Mobile React Native com Lançamento por Voz, Suíte de Investimentos em 5 Abas e Build Local de APK → mobile-architecture.md
+- [project] Auditoria UI/UX Enterprise, Web Interface Guidelines, Otimização de Bootstrap (1 round-trip) e APK Release (18/11/2026) → ui-ux-and-performance-2026-11.md
